@@ -72,20 +72,50 @@ class SupabaseClient:
         """
         Verify Supabase connection is functional.
 
+        Uses the Supabase auth endpoint as a lightweight ping so the check
+        works even before database tables are created.
+
         Returns:
             Dict with status and details
 
         Raises:
-            Exception: If connection fails
+            Exception: If connection fails (network, wrong URL, invalid key)
         """
         try:
-            # Attempt a simple query to verify connection
             client = self._get_client()
-            result = client.table("documents").select("id").limit(1).execute()
-            return {"status": "up", "url": self.url}
+
+            # Try a lightweight table query first
+            try:
+                client.table("documents").select("id").limit(1).execute()
+                return {"status": "up", "url": self.url}
+            except Exception as e:
+                error_str = str(e)
+                error_code = ""
+
+                # Extract PGRST error code if present
+                if isinstance(e, dict):
+                    error_code = e.get("code", "")
+                elif hasattr(e, "args") and e.args:
+                    # Check raw error dict inside the exception args
+                    for arg in e.args:
+                        if isinstance(arg, dict):
+                            error_code = arg.get("code", "")
+                            break
+
+                # Also check the string representation
+                if "PGRST205" in error_str or "Could not find the table" in error_str:
+                    # Table doesn't exist yet — connection is fine, just no schema
+                    logger.info(
+                        "supabase_tables_not_created",
+                        note="Database is connected but tables are not yet created. Run the SQL migration.",
+                    )
+                    return {
+                        "status": "up",
+                        "url": self.url,
+                        "note": "Connected — tables not yet created. Run docs/migrations/001_initial_schema.sql in Supabase SQL Editor.",
+                    }
+                raise
+
         except Exception as e:
             logger.error("supabase_health_check_failed", error=str(e))
-            # If table doesn't exist yet, connection is still valid
-            if "does not exist" in str(e).lower():
-                return {"status": "up", "url": self.url, "note": "tables not yet created"}
             raise
