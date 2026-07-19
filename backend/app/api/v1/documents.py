@@ -1,7 +1,8 @@
 """
 Documents API
 
-Endpoints for document upload, listing, retrieval, status, and deletion.
+Endpoints for document upload, listing, retrieval, status, deletion,
+and manual reprocessing trigger.
 
 All endpoints follow the standard response format:
     Success: {"status": "success", "message": "...", "data": {...}}
@@ -12,13 +13,14 @@ Upload endpoint returns HTTP 202 Accepted — never blocks for processing.
 
 import time
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 import structlog
 
 from app.core.dependencies import (
     get_upload_service,
     get_document_service,
+    get_document_repository,
 )
 from app.services.upload_service import UploadService, FileValidationError
 from app.services.document_service import DocumentService
@@ -347,4 +349,87 @@ async def delete_document(
         return JSONResponse(
             status_code=500,
             content={"status": "error", "message": "Failed to delete document", "errors": {}},
+        )
+
+
+# -----------------------------------------------
+# Reprocess Document (Manual Trigger)
+# -----------------------------------------------
+
+@router.post(
+    "/{document_id}/reprocess",
+    summary="Reprocess Document",
+    description=(
+        "Manually trigger document processing pipeline. "
+        "Useful when Inngest is not available or for re-running after a failure. "
+        "Returns 202 Accepted; processing runs in the background."
+    ),
+    status_code=202,
+)
+async def reprocess_document(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    document_svc: DocumentService = Depends(get_document_service),
+) -> JSONResponse:
+    """
+    Manually trigger the processing pipeline for an existing document.
+
+    This endpoint is useful in development when Inngest Dev Server is not
+    running, or when a document needs to be reprocessed after a failure.
+
+    The processing job runs asynchronously via FastAPI BackgroundTasks.
+    Poll GET /documents/{id}/status for progress.
+    """
+    try:
+        # Fetch document to get storage info
+        doc = await document_svc.get_document(document_id)
+
+        if doc is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": "error",
+                    "message": f"Document '{document_id}' not found",
+                    "errors": {},
+                },
+            )
+
+        # Import handler here to avoid circular imports at module level
+        from app.events.processing_handler import handle_document_uploaded
+
+        async def run_processing():
+            try:
+                await handle_document_uploaded(
+                    document_id=doc.id,
+                    storage_path=doc.storage_path,
+                    mime_type=f"application/{doc.file_type}",  # Best guess
+                    file_size=doc.file_size,
+                    original_filename=doc.filename,
+                    user_id=doc.user_id,
+                )
+            except Exception as e:
+                logger.error(
+                    "reprocess_background_failed",
+                    document_id=document_id,
+                    error=str(e),
+                )
+
+        background_tasks.add_task(run_processing)
+
+        logger.info("reprocess_triggered", document_id=document_id)
+
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "success",
+                "message": "Processing started. Poll /status for updates.",
+                "data": {"document_id": document_id},
+            },
+        )
+
+    except Exception as e:
+        logger.error("reprocess_trigger_failed", document_id=document_id, error=str(e))
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": "Failed to trigger reprocessing", "errors": {}},
         )

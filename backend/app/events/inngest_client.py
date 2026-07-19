@@ -183,3 +183,53 @@ class InngestClient:
             payload=payload,
             user_id=user_id,
         )
+
+    def send_document_processed_event(
+        self,
+        document_id: str,
+        canonical_storage_path: str,
+        processing_time: float,
+        page_count: int = 0,
+        word_count: int = 0,
+        ocr_applied: bool = False,
+        language: str = "en",
+        file_type: str = "",
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Emit the `document.processed` event to trigger Epic 3 (AI Extraction).
+
+        This is the handoff from Epic 2 to Epic 3.
+        The AI Knowledge Extraction service subscribes to this event.
+
+        Args:
+            document_id: Supabase document ID
+            canonical_storage_path: Storage path of the canonical JSON
+            processing_time: Processing duration in seconds
+            page_count: Number of pages extracted
+            word_count: Word count of full text
+            ocr_applied: Whether OCR was applied
+            language: Detected document language
+            file_type: Source file type
+            user_id: User ID (optional)
+
+        Returns:
+            True if event was sent successfully
+        """
+        payload = {
+            "document_id": document_id,
+            "canonical_storage_path": canonical_storage_path,
+            "processing_time": processing_time,
+            "page_count": page_count,
+            "word_count": word_count,
+            "ocr_applied": ocr_applied,
+            "language": language,
+            "file_type": file_type,
+            "user_id": user_id,
+        }
+
+        return self.send_event(
+            event_name="document.processed",
+            payload=payload,
+            user_id=user_id,
+        )

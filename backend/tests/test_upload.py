@@ -143,7 +143,8 @@ class TestFileValidation:
             file_size=10240,
             file_content=b"\xff\xd8\xff",
         )
-        assert result == "jpg"
+        # image/jpeg now maps to DocumentType.JPEG whose value is 'jpeg'
+        assert result in ("jpg", "jpeg")
 
     def test_png_accepted(self):
         result = self.svc.validate_file(

@@ -55,6 +55,19 @@ class ProcessingJobType(str, Enum):
     COMPLIANCE_ANALYSIS = "compliance_analysis"
 
 
+class ProcessingStage(str, Enum):
+    """Pipeline stage labels used in document.processing_stage column."""
+    PARSING = "parsing"
+    OCR_RUNNING = "ocr_running"
+    NORMALIZING = "normalizing"
+    EXTRACTING = "extracting"
+    BUILDING_GRAPH = "building_graph"
+    GENERATING_EMBEDDINGS = "generating_embeddings"
+    SUMMARIZING = "summarizing"
+    COMPLIANCE_CHECK = "compliance_check"
+    COMPLETED = "completed"
+
+
 # -----------------------------------------------
 # Ontology
 # -----------------------------------------------
@@ -125,7 +138,7 @@ SUPPORTED_MIME_TYPES = {
     "text/plain": DocumentType.TXT,
     "text/csv": DocumentType.CSV,
     "image/png": DocumentType.PNG,
-    "image/jpeg": DocumentType.JPG,
+    "image/jpeg": DocumentType.JPEG,
     "image/tiff": DocumentType.TIFF,
 }
 
