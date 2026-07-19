@@ -15,6 +15,11 @@ from app.database.neo4j_client import Neo4jClient
 from app.database.pinecone_client import PineconeClient
 from app.ai.llm_service import LLMService
 from app.ai.prompt_manager import PromptManager
+from app.repositories.storage_repository import StorageRepository
+from app.repositories.document_repository import DocumentRepository
+from app.events.inngest_client import InngestClient
+from app.services.upload_service import UploadService
+from app.services.document_service import DocumentService
 
 
 # -----------------------------------------------
@@ -78,6 +83,106 @@ def get_pinecone_client() -> PineconeClient:
     return PineconeClient(
         api_key=settings.PINECONE_API_KEY,
         index_name=settings.PINECONE_INDEX,
+    )
+
+
+# -----------------------------------------------
+# Repositories
+# -----------------------------------------------
+
+def get_storage_repository(
+    supabase: SupabaseClient = Depends(get_supabase_client),
+) -> StorageRepository:
+    """
+    Inject StorageRepository.
+
+    Args:
+        supabase: Injected Supabase client
+
+    Returns:
+        StorageRepository instance
+    """
+    return StorageRepository(supabase=supabase)
+
+
+def get_document_repository(
+    supabase: SupabaseClient = Depends(get_supabase_client),
+) -> DocumentRepository:
+    """
+    Inject DocumentRepository.
+
+    Args:
+        supabase: Injected Supabase client
+
+    Returns:
+        DocumentRepository instance
+    """
+    return DocumentRepository(supabase=supabase)
+
+
+# -----------------------------------------------
+# Events
+# -----------------------------------------------
+
+@lru_cache()
+def get_inngest_client() -> InngestClient:
+    """
+    Inject InngestClient (cached singleton).
+
+    Returns:
+        InngestClient configured for dev or production
+    """
+    settings = get_settings()
+    return InngestClient(
+        event_key=settings.INNGEST_EVENT_KEY,
+        is_development=settings.is_development,
+    )
+
+
+# -----------------------------------------------
+# Services
+# -----------------------------------------------
+
+def get_upload_service(
+    storage_repo: StorageRepository = Depends(get_storage_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    inngest: InngestClient = Depends(get_inngest_client),
+) -> UploadService:
+    """
+    Inject UploadService.
+
+    Args:
+        storage_repo: Injected StorageRepository
+        document_repo: Injected DocumentRepository
+        inngest: Injected InngestClient
+
+    Returns:
+        UploadService instance
+    """
+    return UploadService(
+        storage_repo=storage_repo,
+        document_repo=document_repo,
+        inngest=inngest,
+    )
+
+
+def get_document_service(
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    storage_repo: StorageRepository = Depends(get_storage_repository),
+) -> DocumentService:
+    """
+    Inject DocumentService.
+
+    Args:
+        document_repo: Injected DocumentRepository
+        storage_repo: Injected StorageRepository (for delete operations)
+
+    Returns:
+        DocumentService instance
+    """
+    return DocumentService(
+        document_repo=document_repo,
+        storage_repo=storage_repo,
     )
 
 

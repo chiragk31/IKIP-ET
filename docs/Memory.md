@@ -517,8 +517,8 @@ User Question → Embedding → Pinecone (top-K chunks) → Neo4j (related entit
 | Phase | Task | Status |
 |---|---|---|
 | 0 | Project Foundation | ✅ Completed |
-| 1 | Document Upload | 🔲 Next |
-| 2 | Document Processing Pipeline | 🔲 Planned |
+| 1 | Document Upload | ✅ Completed |
+| 2 | Document Processing Pipeline | 🔲 Next |
 | 3 | AI Knowledge Extraction | 🔲 Planned |
 | 4 | Ontology Management | 🔲 Planned |
 | 5 | Knowledge Graph | 🔲 Planned |
@@ -528,6 +528,131 @@ User Question → Embedding → Pinecone (top-K chunks) → Neo4j (related entit
 | 9 | Dashboard | 🔲 Planned |
 | 10 | Authentication | 🔲 Planned |
 | 11 | Deployment & Demo | 🔲 Planned |
+
+---
+
+# Phase 1 Completion Record — Document Upload (2026-07-19)
+
+## Summary
+
+Epic 1 fully implemented: a robust, asynchronous document upload system with validation, storage, metadata persistence, event emission, and frontend UI.
+
+## Files Created
+
+**Backend**
+
+| File | Purpose |
+|---|---|
+| `backend/app/schemas/upload.py` | Pydantic schemas for upload/document API |
+| `backend/app/models/document.py` | DocumentModel and ProcessingJobModel dataclasses |
+| `backend/app/repositories/storage_repository.py` | StorageRepository — Supabase Storage CRUD |
+| `backend/app/repositories/document_repository.py` | DocumentRepository — Supabase DB CRUD |
+| `backend/app/events/inngest_client.py` | InngestClient — emits `document.uploaded` event |
+| `backend/app/services/upload_service.py` | UploadService — full upload workflow |
+| `backend/app/services/document_service.py` | DocumentService — list, get, status, delete |
+| `backend/app/api/v1/documents.py` | Documents API router |
+| `backend/tests/test_upload.py` | 17 unit tests (all passing) |
+
+**Files Modified (Backend)**
+
+| File | Change |
+|---|---|
+| `backend/app/core/dependencies.py` | Added repository, service, and Inngest dependencies |
+| `backend/app/api/v1/router.py` | Registered `documents` router at `/documents` prefix |
+
+**Frontend**
+
+| File | Purpose |
+|---|---|
+| `frontend/features/upload/types/index.ts` | Upload feature TypeScript types |
+| `frontend/features/upload/services/upload-service.ts` | UploadService (Axios multipart) |
+| `frontend/features/documents/services/document-service.ts` | DocumentService (list, get, status, delete) |
+| `frontend/features/upload/hooks/use-upload.ts` | useUpload hook (multi-file, progress, retry) |
+| `frontend/features/documents/hooks/use-documents.ts` | useDocuments TanStack Query hook |
+| `frontend/features/upload/components/upload-zone.tsx` | Drag-and-drop upload zone |
+| `frontend/features/upload/components/upload-progress.tsx` | Per-file progress component |
+| `frontend/features/upload/components/upload-history.tsx` | Document history table |
+| `frontend/features/upload/components/status-badge.tsx` | Color-coded status pill |
+| `frontend/app/providers.tsx` | TanStack QueryClientProvider wrapper |
+| `frontend/app/documents/upload/page.tsx` | Upload page (server component) |
+| `frontend/app/documents/upload/upload-page-client.tsx` | Upload page (client component) |
+| `frontend/app/documents/page.tsx` | Documents list page (server) |
+| `frontend/app/documents/documents-page-client.tsx` | Documents list page (client) |
+
+**Files Modified (Frontend)**
+
+| File | Change |
+|---|---|
+| `frontend/app/layout.tsx` | Wrapped children with `<Providers>` |
+
+**Infrastructure**
+
+| File | Purpose |
+|---|---|
+| `docs/migrations/001_initial_schema.sql` | Supabase DB migration (users, documents, processing_jobs, RLS) |
+
+## Upload Workflow
+
+```
+1. User selects files (drag & drop or click-to-browse)
+2. Client validates file size and type (before sending to backend)
+3. POST /api/v1/documents/upload (multipart/form-data)
+4. UploadService.validate_file() — extension, MIME, size checks
+5. StorageRepository.upload_file() → Supabase Storage bucket: `documents`
+   Path pattern: documents/{year}/{month}/{uuid}_{filename}
+6. DocumentRepository.create() → Supabase DB `documents` table
+   Status: queued
+7. InngestClient.send_document_uploaded_event() → emits `document.uploaded`
+   Payload: document_id, storage_path, mime_type, file_size, original_filename
+8. API returns 202 Accepted immediately
+9. Frontend polls GET /api/v1/documents/{id}/status every 3s
+```
+
+## API Endpoints Added
+
+| Method | Endpoint | Status Code | Description |
+|---|---|---|---|
+| POST | /api/v1/documents/upload | 202 | Upload a document |
+| GET | /api/v1/documents/ | 200 | List documents (paginated) |
+| GET | /api/v1/documents/{id} | 200 | Get document details |
+| GET | /api/v1/documents/{id}/status | 200 | Get processing status |
+| DELETE | /api/v1/documents/{id} | 200 | Delete document + file |
+
+## Architectural Decisions
+
+### AD-008: Upload Rollback on DB Failure
+If storage upload succeeds but DB insert fails, the storage file is automatically deleted to prevent orphaned files.
+
+### AD-009: Inngest Failure is Non-Fatal
+If the Inngest event fails to send (dev server not running), the upload still returns 202. The document is saved and can be manually reprocessed. This prevents upload failures from cascading to Inngest connectivity issues.
+
+### AD-010: Two-Component Page Pattern
+Each Next.js page has a server component (`page.tsx`) for metadata and a client component (`*-page-client.tsx`) for interactive logic. This ensures SEO metadata works while allowing full React interactivity.
+
+## Testing
+
+- 17 unit tests in `backend/tests/test_upload.py` — all passing
+- TypeScript: `npx tsc --noEmit` — no errors
+- ESLint: `npm run lint` — no errors
+- Backend Python syntax: all 33+ files valid
+
+## Pending Work for Task 02
+
+Task 02 (Document Processing Pipeline) depends on:
+
+1. `document.uploaded` Inngest event being emitted (✅ done)
+2. `StorageRepository.download_file()` to read files for parsing (✅ done)
+3. `DocumentRepository.update_status()` to update pipeline progress (✅ done)
+4. `DocumentRepository.create_processing_job()` for job tracking (✅ done)
+5. `CanonicalKnowledgeObject` schema for AI pipeline output (✅ in schemas/common.py)
+
+Task 02 should implement:
+- Inngest function handler listening on `document.uploaded`
+- DoclingParser for text/table extraction
+- PaddleOCR for scanned documents
+- ProcessingJobModel creation per stage
+- `document.parsed` event emission to trigger Epic 3
+
 
 ---
 

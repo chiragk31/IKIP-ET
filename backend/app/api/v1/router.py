@@ -8,19 +8,21 @@ Pattern: router.include_router(module.router, prefix="/prefix", tags=["Tag"])
 """
 
 from fastapi import APIRouter
-from app.api.v1 import health
+from app.api.v1 import health, documents
 
 api_router = APIRouter()
 
 # Health Check
 api_router.include_router(health.router)
 
-# Future routes will be registered here as each Epic is completed:
-# from app.api.v1 import auth, documents, graph, assets, search, chat
+# Documents (Phase 1 — Upload)
+api_router.include_router(documents.router, prefix="/documents", tags=["Documents"])
+
+# Future routes registered as each Epic is completed:
+# from app.api.v1 import auth, graph, assets, search, chat
 # from app.api.v1 import compliance, maintenance, dashboard, users, admin
 #
 # api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-# api_router.include_router(documents.router, prefix="/documents", tags=["Documents"])
 # api_router.include_router(graph.router, prefix="/graph", tags=["Knowledge Graph"])
 # api_router.include_router(assets.router, prefix="/assets", tags=["Assets"])
 # api_router.include_router(search.router, prefix="/search", tags=["Search"])
