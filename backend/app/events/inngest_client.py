@@ -90,7 +90,7 @@ class InngestClient:
         """
         logger.info(
             "inngest_event_send_start",
-            event=event_name,
+            event_name=event_name,
             payload_keys=list(payload.keys()),
         )
 
@@ -113,14 +113,14 @@ class InngestClient:
                 if response.status_code in (200, 201):
                     logger.info(
                         "inngest_event_send_success",
-                        event=event_name,
+                        event_name=event_name,
                         status_code=response.status_code,
                     )
                     return True
                 else:
                     logger.warning(
                         "inngest_event_send_unexpected_status",
-                        event=event_name,
+                        event_name=event_name,
                         status_code=response.status_code,
                         response_text=response.text[:200],
                     )
@@ -130,7 +130,7 @@ class InngestClient:
             # Inngest Dev Server not running — log and continue
             logger.warning(
                 "inngest_event_send_connection_error",
-                event=event_name,
+                event_name=event_name,
                 note="Inngest Dev Server not reachable. Start with: npx inngest-cli@latest dev",
             )
             return False
@@ -138,7 +138,7 @@ class InngestClient:
         except Exception as e:
             logger.error(
                 "inngest_event_send_failed",
-                event=event_name,
+                event_name=event_name,
                 error=str(e),
             )
             return False
