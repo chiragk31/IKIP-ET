@@ -1,0 +1,59 @@
+version: '3.8'
+
+# =============================================
+# Industrial Knowledge Intelligence Platform
+# Local Development Docker Compose
+# =============================================
+# This compose file is for LOCAL DEVELOPMENT ONLY.
+# Production services (Supabase, Neo4j Aura, Pinecone) are cloud-hosted.
+# =============================================
+
+services:
+
+  # -----------------------------------------------
+  # Backend - FastAPI
+  # -----------------------------------------------
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+    env_file:
+      - ../backend/.env
+    volumes:
+      - ../backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on: []
+    restart: unless-stopped
+
+  # -----------------------------------------------
+  # Frontend - Next.js
+  # -----------------------------------------------
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../frontend/.env.local
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# =============================================
+# Notes:
+# - Supabase is cloud-hosted (supabase.com)
+# - Neo4j is cloud-hosted (neo4j.com/aura)
+# - Pinecone is cloud-hosted (pinecone.io)
+# - Inngest runs locally via: npx inngest-cli dev
+# =============================================

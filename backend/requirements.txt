@@ -1,0 +1,55 @@
+# Core FastAPI
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# Pydantic & Settings
+pydantic==2.8.2
+pydantic-settings==2.4.0
+
+# Environment
+python-dotenv==1.0.1
+
+# Supabase
+supabase==2.7.4
+
+# Neo4j
+neo4j==5.24.0
+
+# Pinecone
+pinecone-client==4.1.2
+
+# Google AI (Gemini + Embeddings)
+google-generativeai==0.8.3
+google-cloud-aiplatform==1.65.0
+
+# Docling (Document Parsing)
+docling==2.5.0
+
+# PaddleOCR
+paddlepaddle==2.6.1
+paddleocr==2.7.3
+
+# Inngest (Event-Driven Workflows)
+inngest==0.4.16
+
+# HTTP Client
+httpx==0.27.2
+aiohttp==3.10.8
+
+# Utilities
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dateutil==2.9.0
+tenacity==9.0.0
+structlog==24.4.0
+
+# Testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
+pytest-cov==5.0.0
+httpx==0.27.2
+
+# Linting / Formatting
+ruff==0.6.8
+black==24.8.0
