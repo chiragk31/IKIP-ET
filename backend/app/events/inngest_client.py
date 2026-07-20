@@ -233,3 +233,38 @@ class InngestClient:
             payload=payload,
             user_id=user_id,
         )
+
+    def send_knowledge_extracted_event(
+        self,
+        document_id: str,
+        knowledge_id: str,
+        confidence: float,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Emit the `knowledge.extracted` event to trigger Epic 4 (Ontology Management).
+
+        This is the handoff from Epic 3 to Epic 4.
+        The Ontology Manager and Graph Builder subscribe to this event.
+
+        Args:
+            document_id: Supabase document ID
+            knowledge_id: UUID of the persisted KnowledgeRecord
+            confidence: Overall extraction confidence score
+            user_id: User ID (optional)
+
+        Returns:
+            True if event was sent successfully
+        """
+        payload = {
+            "document_id": document_id,
+            "knowledge_id": knowledge_id,
+            "confidence": confidence,
+            "user_id": user_id,
+        }
+
+        return self.send_event(
+            event_name="knowledge.extracted",
+            payload=payload,
+            user_id=user_id,
+        )

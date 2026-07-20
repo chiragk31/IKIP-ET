@@ -1,14 +1,5 @@
-"""
-API v1 Router
-
-Central router that registers all v1 API endpoints.
-New endpoints must be added here.
-
-Pattern: router.include_router(module.router, prefix="/prefix", tags=["Tag"])
-"""
-
 from fastapi import APIRouter
-from app.api.v1 import health, documents
+from app.api.v1 import health, documents, knowledge
 
 api_router = APIRouter()
 
@@ -17,6 +8,9 @@ api_router.include_router(health.router)
 
 # Documents (Phase 1 — Upload)
 api_router.include_router(documents.router, prefix="/documents", tags=["Documents"])
+
+# Knowledge Extraction (Phase 3 — AI Extraction)
+api_router.include_router(knowledge.router, prefix="/knowledge", tags=["Knowledge Extraction"])
 
 # Future routes registered as each Epic is completed:
 # from app.api.v1 import auth, graph, assets, search, chat

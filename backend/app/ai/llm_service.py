@@ -139,11 +139,29 @@ class LLMService:
             import json
             result = json.loads(raw_text)
 
+            # Extract token usage and compute cost
+            prompt_tokens = 0
+            candidates_tokens = 0
+            total_tokens = 0
+            estimated_cost = 0.0
+
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", 0)
+                candidates_tokens = getattr(response.usage_metadata, "candidates_token_count", 0)
+                total_tokens = getattr(response.usage_metadata, "total_token_count", 0)
+                # Gemini 2.5 Flash prices: $0.075/M input, $0.30/M output
+                estimated_cost = (prompt_tokens * 0.075 / 1_000_000) + (candidates_tokens * 0.30 / 1_000_000)
+
             duration = time.time() - start_time
             logger.info(
                 "llm_generate_success",
                 prompt_name=prompt_name,
+                model_name=self.model_name,
                 duration_ms=round(duration * 1000, 2),
+                prompt_tokens=prompt_tokens,
+                candidates_tokens=candidates_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=round(estimated_cost, 6),
             )
             return result
 

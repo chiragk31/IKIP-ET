@@ -519,8 +519,8 @@ User Question → Embedding → Pinecone (top-K chunks) → Neo4j (related entit
 | 0 | Project Foundation | ✅ Completed |
 | 1 | Document Upload | ✅ Completed |
 | 2 | Document Processing Pipeline | ✅ Completed |
-| 3 | AI Knowledge Extraction | 🔲 Next |
-| 4 | Ontology Management | 🔲 Planned |
+| 3 | AI Knowledge Extraction | ✅ Completed |
+| 4 | Ontology Management | 🔲 Next |
 | 5 | Knowledge Graph | 🔲 Planned |
 | 6 | Embeddings & Semantic Search | 🔲 Planned |
 | 7 | AI Copilot (RAG) | 🔲 Planned |
@@ -890,4 +890,58 @@ All downstream tasks can consume CanonicalDocument directly:
 
 ## Next Step
 
-Implement **Phase 3 — AI Knowledge Extraction** per `docs/tasks/03-ai-extraction.md`.
+Implement **Phase 4 — Ontology Management** per `docs/tasks/04-ontology.md`.
+
+---
+
+# Phase 3 Completion Record — AI Knowledge Extraction (2026-07-20)
+
+## Summary
+
+Epic 3 fully implemented: A multi-stage AI extraction pipeline leveraging Gemini 2.5 Flash to automatically extract entities, relationships, measurements, procedures, and risks from documents, combined with a summary and ontology discovery.
+
+## Architecture
+
+```
+document.processed (event)
+       ↓
+KnowledgeHandler (async)
+       ↓
+ExtractionService.extract()
+  ├── LLMService (w/ PromptManager)
+  │     ├── entity_extraction
+  │     ├── relationship_extraction
+  │     ├── measurement_extraction
+  │     ├── procedure_extraction
+  │     ├── risk_analysis
+  │     ├── summary
+  │     └── ontology_discovery
+  ├── AIValidator (JSON parsing + schema validation + deduplication)
+  ├── KnowledgeRepository (store CKO json + DB metadata)
+  └── InngestClient (emit knowledge.extracted)
+```
+
+## Files Created/Modified
+
+**Backend**
+| File | Purpose |
+|---|---|
+| `backend/app/prompts/*.md` | Prompt templates for 7 extraction stages |
+| `backend/app/schemas/knowledge.py` | CanonicalKnowledgeObject (CKO) and Pydantic schema validation |
+| `backend/app/ai/validator.py` | JSON parsing, Pydantic validation, Deduplication, Confidence Scoring |
+| `backend/app/repositories/knowledge_repository.py` | CKO JSON storage (Storage) & Knowledge Record tracking (DB) |
+| `backend/app/services/extraction_service.py` | Pipeline orchestration, graceful degradation |
+| `backend/app/events/knowledge_handler.py` | Event listener for `document.processed` |
+| `backend/app/api/v1/knowledge.py` | Knowledge API endpoints |
+| `backend/app/ai/llm_service.py` (updated) | Added LLM observability, token usage, cost estimation |
+| `backend/tests/test_extraction.py` | 60+ robust integration/unit tests for entire pipeline |
+
+## Database Additions
+- `docs/migrations/002_knowledge_extractions.sql` (Creates `knowledge_extractions` table tracking AI pipeline runs).
+
+## Canonical Knowledge Object (CKO)
+The CKO acts as the complete, validated payload passed downstream, containing lists of `ExtractedEntity`, `ExtractedRelationship`, `ExtractedMeasurement`, etc., with confidence scores and latency metrics.
+
+## Next Step
+
+Implement **Phase 4 — Ontology Management** per `docs/tasks/04-ontology.md`.

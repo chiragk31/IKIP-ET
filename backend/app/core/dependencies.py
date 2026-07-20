@@ -17,9 +17,11 @@ from app.ai.llm_service import LLMService
 from app.ai.prompt_manager import PromptManager
 from app.repositories.storage_repository import StorageRepository
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.knowledge_repository import KnowledgeRepository
 from app.events.inngest_client import InngestClient
 from app.services.upload_service import UploadService
 from app.services.document_service import DocumentService
+from app.services.extraction_service import ExtractionService
 
 
 # -----------------------------------------------
@@ -224,4 +226,59 @@ def get_llm_service(
         max_retries=settings.GEMINI_MAX_RETRIES,
         timeout=settings.GEMINI_TIMEOUT,
         prompt_manager=prompt_manager,
+    )
+
+
+# -----------------------------------------------
+# Knowledge Repository (Epic 3)
+# -----------------------------------------------
+
+def get_knowledge_repository(
+    supabase: SupabaseClient = Depends(get_supabase_client),
+) -> KnowledgeRepository:
+    """
+    Inject KnowledgeRepository.
+
+    Args:
+        supabase: Injected Supabase client
+
+    Returns:
+        KnowledgeRepository instance
+    """
+    return KnowledgeRepository(supabase=supabase)
+
+
+# -----------------------------------------------
+# Extraction Service (Epic 3)
+# -----------------------------------------------
+
+def get_extraction_service(
+    llm_service: LLMService = Depends(get_llm_service),
+    knowledge_repo: KnowledgeRepository = Depends(get_knowledge_repository),
+    storage_repo: StorageRepository = Depends(get_storage_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    inngest: InngestClient = Depends(get_inngest_client),
+) -> ExtractionService:
+    """
+    Inject ExtractionService.
+
+    This is the AI knowledge extraction pipeline service.
+    It orchestrates all 7 AI extraction stages.
+
+    Args:
+        llm_service: LLM gateway (only Gemini caller)
+        knowledge_repo: CKO persistence
+        storage_repo: Storage access for canonical docs
+        document_repo: Document status updates
+        inngest: Event emitter
+
+    Returns:
+        ExtractionService instance
+    """
+    return ExtractionService(
+        llm_service=llm_service,
+        knowledge_repo=knowledge_repo,
+        storage_repo=storage_repo,
+        document_repo=document_repo,
+        inngest=inngest,
     )
