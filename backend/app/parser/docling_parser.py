@@ -24,6 +24,7 @@ Note on scanned PDFs:
     If Docling's text confidence is low (very little text extracted vs page count),
     ProcessingService will additionally run PaddleOCR on the pages.
 """
+import torch  # noqa: F401
 
 import time
 from pathlib import Path

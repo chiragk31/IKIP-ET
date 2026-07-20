@@ -40,6 +40,7 @@ Must follow:
 - Database.md
 - Ontology.md
 - Prompts.md
+- Epics.md
 
 ---
 

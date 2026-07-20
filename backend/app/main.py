@@ -4,6 +4,7 @@ Backend Entry Point
 
 FastAPI application initialization and configuration.
 """
+import torch  # noqa: F401
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI

@@ -68,6 +68,7 @@ def _try_import_paddleocr():
 def _try_import_tesseract():
     """Try to import pytesseract, return None if not available."""
     try:
+        
         import pytesseract
         return pytesseract
     except ImportError:
@@ -199,6 +200,7 @@ class OCRService:
         results: List[OCRPageResult] = []
 
         try:
+            
             from pdf2image import convert_from_path
 
             logger.info("ocr_pdf_start", path=local_pdf_path)
