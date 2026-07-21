@@ -1,6 +1,6 @@
 # Risk Analysis Prompt
 
-Version: 1.0
+Version: 1.1
 Last Updated: 2026-07-20
 Author: IKIP Platform
 Purpose: Identify hazards, safety risks, failure modes, warnings, and compliance gaps in industrial documents
@@ -17,7 +17,7 @@ For each risk, provide:
 - The risk category (safety, operational, environmental, compliance, financial)
 - The severity level (critical, high, medium, low)
 - The probability/likelihood (if mentioned)
-- The associated asset or system
+- The associated asset or system — use the entity_id from the Entity Registry below
 - The risk description
 - Potential consequences
 - Recommended mitigations (if mentioned)
@@ -62,6 +62,22 @@ For each risk, provide:
 
 ---
 
+## Entity Registry
+
+The following entities were extracted in a previous stage.
+
+When assigning `applies_to_entity`, you MUST use ONLY the `entity_id` values from this list.
+
+Do NOT invent new entity IDs.
+
+If a risk cannot be matched to any entity in this registry, set `applies_to_entity` to `"unknown_entity"`.
+
+```json
+{{entity_registry}}
+```
+
+---
+
 ## Rules
 
 - Extract ONLY risks explicitly stated or clearly implied in the document.
@@ -70,6 +86,8 @@ For each risk, provide:
 - Capture regulatory references when mentioned.
 - A warning in the text is always a risk — extract it.
 - Failure modes described are risks — extract them.
+- Associate the risk with the nearest named asset using the Entity Registry above.
+- Never invent entity IDs. Only use IDs from the Entity Registry.
 
 ---
 

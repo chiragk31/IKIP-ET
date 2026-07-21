@@ -20,6 +20,7 @@ from pathlib import Path
 
 from app.ai.validator import AIValidator
 from app.ai.prompt_manager import PromptManager
+from app.ai.llm_service import TokenUsage
 from app.schemas.knowledge import (
     CanonicalKnowledgeObject,
     EntityExtractionResult,
@@ -487,7 +488,7 @@ class TestExtractionService:
         }
 
         async def mock_generate(prompt_name, variables, **kwargs):
-            return responses.get(prompt_name, {})
+            return responses.get(prompt_name, {}), TokenUsage.zero()
 
         llm_service.generate = mock_generate
         llm_service.model_name = "gemini-2.5-flash"
@@ -620,7 +621,7 @@ class TestExtractionService:
             document_id="doc-123",
             canonical_storage_path="processed/doc-123/canonical.json",
         )
-        assert cko.prompt_version == "1.0"
+        assert cko.prompt_version == "1.1"
 
     @pytest.mark.asyncio
     async def test_entity_stage_failure_graceful_degradation(self):

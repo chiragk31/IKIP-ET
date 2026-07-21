@@ -85,7 +85,7 @@ IKIP is an AI-powered Industrial Knowledge Intelligence Platform that transforms
 
 - **Database**: Neo4j Aura (Free instance)
 - **Core Node Types**: Document, Asset, Person, Organization, Location, Procedure, Event, Measurement, Risk, Regulation, Concept (dynamic)
-- **Key Relationships**: MENTIONS, HAS_FAILURE, LOCATED_IN, PERFORMED, HAS_MEASUREMENT, REFERENCES, CONNECTED_TO, RELATED_TO, CAUSED_BY, USES, OWNED_BY
+- **Key Relationships**: `MENTIONS`, `HAS_FAILURE`, `LOCATED_IN`, `PERFORMED`, `HAS_MEASUREMENT`, `REFERENCES`, `CONNECTED_TO`, `RELATED_TO`, `CAUSED_BY`, `USES`, `REQUIRES`, `MITIGATED_BY`, `RECORDED_FOR`, `INVOLVES`, `OWNS`, `GENERATED_FROM`, `PART_OF`
 - **Rule**: LLM NEVER writes Cypher. LLM produces JSON → Graph Builder produces Cypher → Neo4j.
 
 ## Storage
@@ -273,7 +273,7 @@ IndustrialKnowledgeIntelligence/
 
 Core Node Labels: `Document`, `Asset`, `Person`, `Organization`, `Location`, `Procedure`, `Event`, `Measurement`, `Risk`, `Failure`, `Regulation`, `Concept`
 
-Key Relationship Types: `MENTIONS`, `HAS_FAILURE`, `LOCATED_IN`, `PERFORMED`, `HAS_MEASUREMENT`, `REFERENCES`, `CONNECTED_TO`, `RELATED_TO`, `CAUSED_BY`, `USES`, `REQUIRES`, `MITIGATED_BY`, `RECORDED_FOR`, `INVOLVES`, `OWNS`
+Key Relationship Types: `MENTIONS`, `HAS_FAILURE`, `LOCATED_IN`, `PERFORMED`, `HAS_MEASUREMENT`, `REFERENCES`, `CONNECTED_TO`, `RELATED_TO`, `CAUSED_BY`, `USES`, `REQUIRES`, `MITIGATED_BY`, `RECORDED_FOR`, `INVOLVES`, `OWNS`, `GENERATED_FROM`, `PART_OF`
 
 ## Pinecone
 
@@ -520,9 +520,9 @@ User Question → Embedding → Pinecone (top-K chunks) → Neo4j (related entit
 | 1 | Document Upload | ✅ Completed |
 | 2 | Document Processing Pipeline | ✅ Completed |
 | 3 | AI Knowledge Extraction | ✅ Completed |
-| 4 | Ontology Management | 🔲 Next |
-| 5 | Knowledge Graph | 🔲 Planned |
-| 6 | Embeddings & Semantic Search | 🔲 Planned |
+| 4 | Ontology Management | ✅ Completed |
+| 5 | Knowledge Graph | ✅ Completed |
+| 6 | Embeddings & Semantic Search | 🔲 Next |
 | 7 | AI Copilot (RAG) | 🔲 Planned |
 | 8 | Asset Intelligence | 🔲 Planned |
 | 9 | Dashboard | 🔲 Planned |
@@ -942,6 +942,154 @@ ExtractionService.extract()
 ## Canonical Knowledge Object (CKO)
 The CKO acts as the complete, validated payload passed downstream, containing lists of `ExtractedEntity`, `ExtractedRelationship`, `ExtractedMeasurement`, etc., with confidence scores and latency metrics.
 
+---
+
+# Epic 4: Ontology Management (COMPLETED)
+
+Epic 4 implements the Ontology Management and Normalization pipeline. It transforms raw Canonical Knowledge Objects (CKO) into Normalized Knowledge Objects (NKO) ready for graph ingestion.
+
+## Architecture
+
+```
+knowledge.extracted (event)
+       ↓
+OntologyHandler (async)
+       ↓
+OntologyManager.process()
+  ├── EntityMapper (deduplication)
+  │     ├── SynonymResolver
+  │     └── AliasResolver
+  ├── RelationshipValidator (referential integrity)
+  ├── OntologyDiscovery (filtering core concepts)
+  ├── OntologyRepository (save new concepts for review)
+  └── OntologyValidator (final sanity check)
+       ↓
+NKO Created
+       ↓
+InngestClient (emit ontology.updated)
+```
+
+## Files Created/Modified
+
+**Backend**
+| File | Purpose |
+|---|---|
+| `backend/app/ontology/constants.py` | Ontology entity and relationship enums/lists, core synonyms |
+| `backend/app/ontology/models.py` | Pydantic schemas for `NormalizedEntity`, `NormalizedKnowledgeObject`, etc. |
+| `backend/app/ontology/synonym_resolver.py` | Map variations to canonical terms (e.g. Water Pump -> Pump) |
+| `backend/app/ontology/alias_resolver.py` | Normalize equipment tags (e.g. P 101 -> P-101) |
+| `backend/app/ontology/entity_mapper.py` | Apply synonyms, aliases, and merge duplicate entities |
+| `backend/app/ontology/relationship_validator.py` | Ensure referential integrity and valid relations |
+| `backend/app/ontology/ontology_discovery.py` | Filter out new concepts that are already core |
+| `backend/app/ontology/ontology_repository.py` | Save newly discovered concepts to Supabase |
+| `backend/app/ontology/ontology_validator.py` | Final validation of NKO |
+| `backend/app/ontology/ontology_manager.py` | Orchestration of all normalization modules |
+| `backend/app/events/ontology_handler.py` | Event listener for `knowledge.extracted` |
+| `backend/app/api/v1/ontology.py` | API endpoint to manually trigger normalization |
+| `backend/tests/test_ontology.py` | Unit tests for ontology logic |
+
+## Database Additions
+- `docs/migrations/003_ontology_concepts.sql` (Creates `ontology_concepts` table for discovered entities requiring human review).
+
+---
+
+# Phase 5 Completion Record — Knowledge Graph Builder (2026-07-21)
+
+## Summary
+
+Epic 5 fully implemented: a deterministic, idempotent Knowledge Graph Builder that
+transforms NormalizedKnowledgeObjects (from Epic 4) into Neo4j nodes and relationships.
+No AI calls — zero Gemini involvement. Every element carries provenance.
+
+## Architecture
+
+```
+ontology.updated (event)
+       ↓
+GraphHandler (async)
+       ↓
+GraphService.build(document_id)
+  ├── OntologyRepository.load_nko()   ← loads persisted NKO from Supabase Storage
+  ├── NodeBuilder                     ← NormalizedEntity → GraphNode
+  │     (entity_id = stable MERGE key)
+  ├── RelationshipBuilder             ← NormalizedRelationship → GraphRelationship
+  │     (referential integrity check)
+  ├── GraphValidator                  ← pre-insert: dup nodes/rels, invalid labels,
+  │     missing refs, self-links, confidence bounds
+  └── GraphRepository                 ← ONLY Neo4j writer; MERGE-based batch writes
+       ↓
+InngestClient (emit graph.updated)
+```
+
+## Files Created
+
+**Backend**
+| File | Purpose |
+|---|---|
+| `backend/app/graph/__init__.py` | Module init |
+| `backend/app/graph/constants.py` | Valid node labels + relationship types (derived from EntityType/RelationshipType enums); batch sizes |
+| `backend/app/graph/models.py` | `GraphNode`, `GraphRelationship`, `GraphBuildResult` Pydantic models with provenance fields |
+| `backend/app/graph/node_builder.py` | `NormalizedEntity` → `GraphNode`; entity_id is stable; unknown types fall back to Concept |
+| `backend/app/graph/relationship_builder.py` | `NormalizedRelationship` → `GraphRelationship`; referential integrity; self-link rejection |
+| `backend/app/graph/graph_validator.py` | Pre-insert validation: 7 checks including duplicates, missing refs, invalid labels/types, self-links |
+| `backend/app/graph/graph_repository.py` | ONLY Neo4j writer; MERGE on entity_id (nodes) and (src, type, tgt) (rels); batch 100/200 |
+| `backend/app/graph/graph_queries.py` | Parameterized Cypher: Asset 360, Neighbor Discovery, Related Documents, node lookup, paginated list; Shortest Path / Subgraph / Compliance stubbed with TODOs |
+| `backend/app/graph/graph_service.py` | Orchestrator: loads NKO → build → validate → write → return GraphBuildResult |
+| `backend/app/events/graph_handler.py` | Handles `ontology.updated`; runs GraphService; emits `graph.updated` |
+| `backend/app/api/v1/graph.py` | POST /{doc_id}/build, GET /nodes, GET /node/{id}, GET /{doc_id}/status |
+| `backend/tests/test_graph.py` | 23 unit tests: NodeBuilder (7), RelationshipBuilder (6), GraphValidator (9), Idempotency (2) |
+
+## Files Modified
+
+| File | Change |
+|---|---|
+| `backend/app/events/inngest_client.py` | Added `send_graph_updated_event()` (Epic 5 → 6 handoff) |
+| `backend/app/api/v1/router.py` | Registered graph router at `/graph` prefix |
+| `backend/app/core/dependencies.py` | Added `get_graph_repository()`, `get_graph_service()` |
+
+## Architectural Decisions
+
+### AD-017: NKO as Sole Graph Input
+Graph Builder loads the persisted NKO artifact (`normalized/{id}/nko.json`) via
+`OntologyRepository.load_nko()`. It never reads the raw CKO and never re-runs
+normalization logic. This creates a clean contract: Epic 4 is responsible for
+normalization, Epic 5 is responsible for graph writes.
+
+### AD-018: MERGE-Based Idempotent Writes
+All Neo4j writes use `MERGE` keyed on `entity_id` for nodes and
+`(source_id, rel_type, target_id)` for relationships. Re-processing the same
+document multiple times never creates duplicate graph elements.
+
+### AD-019: Pre-Insert Validation Pass
+All nodes and relationships are validated before any Neo4j write begins.
+Invalid elements are collected into `ValidationResult.invalid_*` lists and
+logged — they are never silently dropped. This makes pipeline failures visible
+without corrupting the graph with partial data.
+
+### AD-020: Graph Queries Separate from Repository
+All Cypher strings live in `graph_queries.py`, not inlined in `graph_repository.py`.
+This makes the Cypher reviewable in isolation, and ensures repository methods only
+execute pre-approved, parameterized queries — never dynamic or AI-generated strings.
+
+## Test Results
+
+- **23/23 graph tests pass** (`tests/test_graph.py`)
+- **142/142 total platform tests pass** (no regressions in Epics 1–4)
+- The exit code 1 from the full suite run is the pre-existing Neo4j cloud connection
+  teardown warning (documented in AD-011 / Phase 2 record) — not a test failure
+
+## Definition of Done Checklist (from 05-graph.md)
+
+| Criterion | Status |
+|---|---|
+| Nodes generated from NormalizedKnowledgeObject (not raw CKO) | ✅ — `GraphService.build()` calls `load_nko()` exclusively |
+| Relationships validated before insertion | ✅ — `GraphValidator` runs before `GraphRepository` |
+| Graph updates are idempotent | ✅ — MERGE semantics; `TestIdempotency` proves same input → same output |
+| Neo4j accessed only through GraphRepository | ✅ — `GraphRepository` is the only caller of `Neo4jClient.execute_query()` |
+| Provenance stored on every node and relationship | ✅ — `source_document`, `confidence`, `extraction_version`, `created_at` on all elements |
+| `graph.updated` event emitted | ✅ — `graph_handler.py` calls `send_graph_updated_event()` |
+| No AI/Gemini calls anywhere in graph module | ✅ — zero LLMService imports in `backend/app/graph/` |
+
 ## Next Step
 
-Implement **Phase 4 — Ontology Management** per `docs/tasks/04-ontology.md`.
+Implement **Phase 6 — Semantic Embeddings** per `docs/tasks/06-embeddings.md`.

@@ -268,3 +268,73 @@ class InngestClient:
             payload=payload,
             user_id=user_id,
         )
+
+    def send_ontology_updated_event(
+        self,
+        document_id: str,
+        entity_count: int,
+        relationship_count: int,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Emit the `ontology.updated` event to trigger Epic 5 (Graph Builder).
+
+        This is the handoff from Epic 4 to Epic 5.
+        The Graph Builder subscribes to this event.
+
+        Args:
+            document_id: Supabase document ID
+            entity_count: Number of normalized entities
+            relationship_count: Number of validated relationships
+            user_id: User ID (optional)
+
+        Returns:
+            True if event was sent successfully
+        """
+        payload = {
+            "document_id": document_id,
+            "entity_count": entity_count,
+            "relationship_count": relationship_count,
+            "user_id": user_id,
+        }
+
+        return self.send_event(
+            event_name="ontology.updated",
+            payload=payload,
+            user_id=user_id,
+        )
+
+    def send_graph_updated_event(
+        self,
+        document_id: str,
+        nodes_written: int,
+        relationships_written: int,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Emit the `graph.updated` event to trigger Epic 6 (Embeddings).
+
+        This is the handoff from Epic 5 to Epic 6.
+        The Embedding Generator subscribes to this event.
+
+        Args:
+            document_id: Supabase document ID
+            nodes_written: Number of nodes merged into Neo4j
+            relationships_written: Number of relationships merged into Neo4j
+            user_id: User ID (optional)
+
+        Returns:
+            True if event was sent successfully
+        """
+        payload = {
+            "document_id": document_id,
+            "nodes_written": nodes_written,
+            "relationships_written": relationships_written,
+            "user_id": user_id,
+        }
+
+        return self.send_event(
+            event_name="graph.updated",
+            payload=payload,
+            user_id=user_id,
+        )

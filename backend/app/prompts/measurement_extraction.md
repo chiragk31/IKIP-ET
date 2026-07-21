@@ -1,6 +1,6 @@
 # Measurement Extraction Prompt
 
-Version: 1.0
+Version: 1.1
 Last Updated: 2026-07-20
 Author: IKIP Platform
 Purpose: Extract all numerical measurements, physical quantities, and engineering values from industrial documents
@@ -16,7 +16,7 @@ For each measurement, provide:
 - The measurement name/parameter
 - The numeric value
 - The unit of measurement
-- The entity it applies to (asset, equipment, system)
+- The entity it applies to (asset, equipment, system) — use the entity_id from the Entity Registry below
 - The context in which it appears
 - Whether it is a limit/threshold or an actual measured value
 - The page number (if available)
@@ -41,6 +41,22 @@ For each measurement, provide:
 
 ---
 
+## Entity Registry
+
+The following entities were extracted in a previous stage.
+
+When assigning `applies_to_entity`, you MUST use ONLY the `entity_id` values from this list.
+
+Do NOT invent new entity IDs.
+
+If a measurement cannot be matched to any entity in this registry, set `applies_to_entity` to `"unknown_entity"`.
+
+```json
+{{entity_registry}}
+```
+
+---
+
 ## Rules
 
 - Extract ONLY measurements explicitly stated in the text.
@@ -49,7 +65,8 @@ For each measurement, provide:
 - Always extract the unit with the value.
 - If a range is given (e.g., 120–150 psi), extract both min and max.
 - If a tolerance is given (e.g., 100 ± 5 bar), capture both.
-- Associate each measurement with the nearest named asset or system.
+- Associate each measurement with the nearest named asset using the Entity Registry above.
+- Never invent entity IDs. Only use IDs from the Entity Registry.
 
 ---
 

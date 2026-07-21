@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import health, documents, knowledge
+from app.api.v1 import health, documents, knowledge, ontology, graph
 
 api_router = APIRouter()
 
@@ -12,12 +12,17 @@ api_router.include_router(documents.router, prefix="/documents", tags=["Document
 # Knowledge Extraction (Phase 3 — AI Extraction)
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["Knowledge Extraction"])
 
+# Ontology (Phase 2 — Structural Mapping)
+api_router.include_router(ontology.router, prefix="/ontology", tags=["Ontology"])
+
+# Knowledge Graph (Phase 5 — Graph Builder)
+api_router.include_router(graph.router, prefix="/graph", tags=["Knowledge Graph"])
+
 # Future routes registered as each Epic is completed:
-# from app.api.v1 import auth, graph, assets, search, chat
+# from app.api.v1 import auth, assets, search, chat
 # from app.api.v1 import compliance, maintenance, dashboard, users, admin
 #
 # api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-# api_router.include_router(graph.router, prefix="/graph", tags=["Knowledge Graph"])
 # api_router.include_router(assets.router, prefix="/assets", tags=["Assets"])
 # api_router.include_router(search.router, prefix="/search", tags=["Search"])
 # api_router.include_router(chat.router, prefix="/chat", tags=["AI Copilot"])

@@ -1,7 +1,7 @@
 # Ontology Discovery Prompt
 
-Version: 1.0
-Last Updated: 2026-07-19
+Version: 1.1
+Last Updated: 2026-07-20
 Author: IKIP Platform
 Purpose: Discover new industrial concepts not present in the current ontology
 
@@ -27,13 +27,23 @@ The following entity types already exist and must NOT be proposed again:
 
 ---
 
+## Entity Registry
+
+The following specific entities were extracted in a previous stage. Do not propose these specific entities as new concept categories. Only propose broad concepts that would group these entities or describe entirely new kinds of things.
+
+```json
+{{entity_registry}}
+```
+
+---
+
 ## Rules
 
 - Only propose concepts that appear important and reusable.
 - Never propose company-specific jargon that won't generalize.
 - Assign confidence scores to each proposed concept.
 - Provide clear justification for each proposed concept.
-- Do NOT propose concepts that already exist.
+- Do NOT propose concepts or entity types that already exist.
 
 ---
 

@@ -260,7 +260,9 @@ class CanonicalKnowledgeObject(BaseModel):
 
     # Pipeline stage latencies (observability)
     stage_latencies: Dict[str, float] = Field(default_factory=dict, description="Per-stage latency in seconds")
-    total_tokens_used: int = Field(default=0, description="Estimated total tokens consumed")
+    total_prompt_tokens: int = Field(default=0, description="Accumulated prompt tokens across all LLM stages")
+    total_completion_tokens: int = Field(default=0, description="Accumulated completion tokens across all LLM stages")
+    total_tokens_used: int = Field(default=0, description="Total tokens consumed (prompt + completion)")
 
 
 # -----------------------------------------------

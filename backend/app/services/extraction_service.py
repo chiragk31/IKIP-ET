@@ -11,14 +11,14 @@ Architecture:
         ↓
     ExtractionService.extract(document_id, canonical_storage_path)
         ↓
-    [Parallel/Sequential AI Stages]
+    [Sequential AI Stages]
         ├── Stage 1: Entity Extraction
-        ├── Stage 2: Relationship Extraction (uses entities from Stage 1)
-        ├── Stage 3: Measurement Extraction
-        ├── Stage 4: Procedure Extraction
-        ├── Stage 5: Risk Extraction
+        ├── Stage 2: Relationship Extraction (uses entity registry from Stage 1)
+        ├── Stage 3: Measurement Extraction (uses entity registry from Stage 1)
+        ├── Stage 4: Procedure Extraction (uses entity registry from Stage 1)
+        ├── Stage 5: Risk Extraction (uses entity registry from Stage 1)
         ├── Stage 6: Summary Generation
-        └── Stage 7: Ontology Discovery
+        └── Stage 7: Ontology Discovery (uses entity registry from Stage 1)
         ↓
     Validation → Confidence Filtering → CKO Assembly
         ↓
@@ -31,15 +31,18 @@ Rules:
     - No other module runs AI extraction.
     - Each stage is independent and fault-tolerant.
     - A stage failure results in an empty result for that stage (graceful degradation).
+    - Entity registry is built after Stage 1 and passed to Stages 2–7 for ID consistency.
+    - Token usage is accumulated across all stages and stored in the CKO.
     - Every call is logged with prompt version, latency, token usage.
+    - Sequential execution only (Gemini Free API rate limits require this).
 """
 
 import json
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
-from app.ai.llm_service import LLMService
+from app.ai.llm_service import LLMService, TokenUsage
 from app.ai.validator import AIValidator
 from app.schemas.knowledge import (
     CanonicalKnowledgeObject,
@@ -62,13 +65,25 @@ from app.utils.constants import ProcessingStage
 logger = structlog.get_logger(__name__)
 
 # Current prompt version — update when prompts are changed
-PROMPT_VERSION = "1.0"
+PROMPT_VERSION = "1.1"
 
 # Confidence threshold for flagging low-quality entities
 LOW_CONFIDENCE_THRESHOLD = 0.75
 
 # Maximum document text length sent to AI (avoid exceeding token limits)
 MAX_TEXT_CHARS = 60_000
+
+# Stage display names for terminal output (stage_index, display_name)
+STAGE_DISPLAY_NAMES = [
+    "Entity Extraction",
+    "Relationship Extraction",
+    "Measurement Extraction",
+    "Procedure Extraction",
+    "Risk Extraction",
+    "Summary Generation",
+    "Ontology Discovery",
+]
+TOTAL_STAGES = len(STAGE_DISPLAY_NAMES)
 
 
 class ExtractionService:
@@ -165,40 +180,57 @@ class ExtractionService:
                 filename=filename,
             )
 
+            # --- Print pipeline header to terminal ---
+            self._print_pipeline_header(filename or document_id)
+
+            # Accumulate token usage across all stages
+            accumulated_tokens = TokenUsage.zero()
+
             # --- Stage 1: Entity Extraction ---
-            entities_result, entity_latency = await self._run_stage_entities(
-                document_id, document_text
+            entities_result, entity_latency, entity_tokens = await self._run_stage_entities(
+                document_id, document_text, stage_index=1
             )
+            accumulated_tokens = accumulated_tokens + entity_tokens
+
+            # --- Build entity registry immediately after Stage 1 ---
+            # All later stages use this registry for entity ID consistency.
+            entity_registry = self._build_entity_registry(entities_result.entities)
 
             # --- Stage 2: Relationship Extraction ---
-            relationships_result, rel_latency = await self._run_stage_relationships(
-                document_id, document_text, entities_result
+            relationships_result, rel_latency, rel_tokens = await self._run_stage_relationships(
+                document_id, document_text, entities_result, stage_index=2
             )
+            accumulated_tokens = accumulated_tokens + rel_tokens
 
             # --- Stage 3: Measurement Extraction ---
-            measurements_result, meas_latency = await self._run_stage_measurements(
-                document_id, document_text
+            measurements_result, meas_latency, meas_tokens = await self._run_stage_measurements(
+                document_id, document_text, entity_registry, stage_index=3
             )
+            accumulated_tokens = accumulated_tokens + meas_tokens
 
             # --- Stage 4: Procedure Extraction ---
-            procedures_result, proc_latency = await self._run_stage_procedures(
-                document_id, document_text
+            procedures_result, proc_latency, proc_tokens = await self._run_stage_procedures(
+                document_id, document_text, entity_registry, stage_index=4
             )
+            accumulated_tokens = accumulated_tokens + proc_tokens
 
             # --- Stage 5: Risk Extraction ---
-            risks_result, risk_latency = await self._run_stage_risks(
-                document_id, document_text
+            risks_result, risk_latency, risk_tokens = await self._run_stage_risks(
+                document_id, document_text, entity_registry, stage_index=5
             )
+            accumulated_tokens = accumulated_tokens + risk_tokens
 
             # --- Stage 6: Summary Generation ---
-            summary_result, summary_latency = await self._run_stage_summary(
-                document_id, document_text, filename
+            summary_result, summary_latency, summary_tokens = await self._run_stage_summary(
+                document_id, document_text, filename, stage_index=6
             )
+            accumulated_tokens = accumulated_tokens + summary_tokens
 
             # --- Stage 7: Ontology Discovery ---
-            ontology_result, ontology_latency = await self._run_stage_ontology(
-                document_id, document_text
+            ontology_result, ontology_latency, ontology_tokens = await self._run_stage_ontology(
+                document_id, document_text, entity_registry, stage_index=7
             )
+            accumulated_tokens = accumulated_tokens + ontology_tokens
 
             # --- Confidence Filtering ---
             accepted_entities, flagged_entities = self._validator.split_by_confidence(
@@ -235,6 +267,14 @@ class ExtractionService:
 
             total_duration = time.time() - pipeline_start
 
+            # --- Print pipeline summary to terminal ---
+            self._print_pipeline_summary(
+                total_duration=total_duration,
+                overall_confidence=overall_confidence,
+                accumulated_tokens=accumulated_tokens,
+                stage_latencies=stage_latencies,
+            )
+
             # --- Assemble CKO ---
             cko = CanonicalKnowledgeObject(
                 document_id=document_id,
@@ -267,6 +307,9 @@ class ExtractionService:
                 prompt_version=PROMPT_VERSION,
                 extraction_time_seconds=round(total_duration, 3),
                 stage_latencies=stage_latencies,
+                total_prompt_tokens=accumulated_tokens.prompt_tokens,
+                total_completion_tokens=accumulated_tokens.completion_tokens,
+                total_tokens_used=accumulated_tokens.total_tokens,
             )
 
             # --- Persist CKO ---
@@ -295,6 +338,10 @@ class ExtractionService:
                 risk_count=len(risks_result.risks),
                 flagged_entity_count=len(flagged_entities),
                 confidence=overall_confidence,
+                total_tokens=accumulated_tokens.total_tokens,
+                total_prompt_tokens=accumulated_tokens.prompt_tokens,
+                total_completion_tokens=accumulated_tokens.completion_tokens,
+                estimated_cost_usd=round(accumulated_tokens.estimated_cost_usd, 6),
             )
 
             return cko
@@ -307,6 +354,11 @@ class ExtractionService:
                 error=str(e),
                 duration_seconds=round(total_duration, 2),
             )
+            print(f"\n{'='*50}")
+            print(f"  EXTRACTION FAILED")
+            print(f"  Document: {document_id}")
+            print(f"  Error: {e}")
+            print(f"{'='*50}\n")
             # Save failure record for traceability
             self._knowledge_repo.save_failed(
                 document_id=document_id,
@@ -325,7 +377,8 @@ class ExtractionService:
         self,
         document_id: str,
         document_text: str,
-    ) -> tuple[EntityExtractionResult, float]:
+        stage_index: int = 1,
+    ) -> Tuple[EntityExtractionResult, float, TokenUsage]:
         """
         Stage 1: Entity Extraction.
 
@@ -335,15 +388,17 @@ class ExtractionService:
         Args:
             document_id: For logging
             document_text: Truncated document text
+            stage_index: Display index for terminal output
 
         Returns:
-            Tuple of (EntityExtractionResult, latency_seconds)
+            Tuple of (EntityExtractionResult, latency_seconds, TokenUsage)
         """
         start = time.time()
+        self._print_stage_start(stage_index, "Entity Extraction")
         logger.info("extraction_stage_start", stage="entity_extraction", document_id=document_id)
 
         try:
-            raw = await self._llm.generate(
+            raw, token_usage = await self._llm.generate(
                 prompt_name="entity_extraction",
                 variables={
                     "document_text": document_text,
@@ -352,17 +407,35 @@ class ExtractionService:
             )
             result = self._validator.validate_entities(raw, document_id)
             latency = time.time() - start
+
+            # Compute average entity confidence for display
+            avg_conf = (
+                round(sum(e.confidence for e in result.entities) / len(result.entities), 3)
+                if result.entities else 0.0
+            )
+
+            self._print_stage_complete(
+                stage_index=stage_index,
+                stage_name="Entity Extraction",
+                latency=latency,
+                tokens=token_usage.total_tokens,
+                count=len(result.entities),
+                count_label="Entities",
+                confidence=avg_conf,
+            )
             logger.info(
                 "extraction_stage_complete",
                 stage="entity_extraction",
                 document_id=document_id,
                 count=len(result.entities),
                 latency_seconds=round(latency, 3),
+                tokens=token_usage.total_tokens,
             )
-            return result, latency
+            return result, latency, token_usage
 
         except Exception as e:
             latency = time.time() - start
+            self._print_stage_failed(stage_index, "Entity Extraction", latency, str(e))
             logger.error(
                 "extraction_stage_failed",
                 stage="entity_extraction",
@@ -370,29 +443,32 @@ class ExtractionService:
                 error=str(e),
                 latency_seconds=round(latency, 3),
             )
-            return EntityExtractionResult(entities=[]), latency
+            return EntityExtractionResult(entities=[]), latency, TokenUsage.zero()
 
     async def _run_stage_relationships(
         self,
         document_id: str,
         document_text: str,
         entities_result: EntityExtractionResult,
-    ) -> tuple[RelationshipExtractionResult, float]:
+        stage_index: int = 2,
+    ) -> Tuple[RelationshipExtractionResult, float, TokenUsage]:
         """
         Stage 2: Relationship Extraction.
 
         Uses the extracted entities from Stage 1 to find relationships.
-        Requires entities to be available for context.
+        Provides the entity registry as context to ensure ID consistency.
 
         Args:
             document_id: For logging
             document_text: Document text
             entities_result: Output from Stage 1
+            stage_index: Display index for terminal output
 
         Returns:
-            Tuple of (RelationshipExtractionResult, latency_seconds)
+            Tuple of (RelationshipExtractionResult, latency_seconds, TokenUsage)
         """
         start = time.time()
+        self._print_stage_start(stage_index, "Relationship Extraction")
         logger.info("extraction_stage_start", stage="relationship_extraction", document_id=document_id)
 
         try:
@@ -409,7 +485,7 @@ class ExtractionService:
                 indent=2,
             )
 
-            raw = await self._llm.generate(
+            raw, token_usage = await self._llm.generate(
                 prompt_name="relationship_extraction",
                 variables={
                     "document_text": document_text,
@@ -418,17 +494,27 @@ class ExtractionService:
             )
             result = self._validator.validate_relationships(raw, document_id)
             latency = time.time() - start
+            self._print_stage_complete(
+                stage_index=stage_index,
+                stage_name="Relationship Extraction",
+                latency=latency,
+                tokens=token_usage.total_tokens,
+                count=len(result.relationships),
+                count_label="Relationships",
+            )
             logger.info(
                 "extraction_stage_complete",
                 stage="relationship_extraction",
                 document_id=document_id,
                 count=len(result.relationships),
                 latency_seconds=round(latency, 3),
+                tokens=token_usage.total_tokens,
             )
-            return result, latency
+            return result, latency, token_usage
 
         except Exception as e:
             latency = time.time() - start
+            self._print_stage_failed(stage_index, "Relationship Extraction", latency, str(e))
             logger.error(
                 "extraction_stage_failed",
                 stage="relationship_extraction",
@@ -436,49 +522,66 @@ class ExtractionService:
                 error=str(e),
                 latency_seconds=round(latency, 3),
             )
-            return RelationshipExtractionResult(relationships=[]), latency
+            return RelationshipExtractionResult(relationships=[]), latency, TokenUsage.zero()
 
     async def _run_stage_measurements(
         self,
         document_id: str,
         document_text: str,
-    ) -> tuple[MeasurementExtractionResult, float]:
+        entity_registry: str,
+        stage_index: int = 3,
+    ) -> Tuple[MeasurementExtractionResult, float, TokenUsage]:
         """
         Stage 3: Measurement Extraction.
 
         Extracts all numerical measurements and physical quantities.
+        Receives the entity registry so applies_to_entity IDs remain canonical.
 
         Args:
             document_id: For logging
             document_text: Document text
+            entity_registry: JSON-serialized entity registry from Stage 1
+            stage_index: Display index for terminal output
 
         Returns:
-            Tuple of (MeasurementExtractionResult, latency_seconds)
+            Tuple of (MeasurementExtractionResult, latency_seconds, TokenUsage)
         """
         start = time.time()
+        self._print_stage_start(stage_index, "Measurement Extraction")
         logger.info("extraction_stage_start", stage="measurement_extraction", document_id=document_id)
 
         try:
-            raw = await self._llm.generate(
+            raw, token_usage = await self._llm.generate(
                 prompt_name="measurement_extraction",
                 variables={
                     "document_text": document_text,
                     "document_id": document_id,
+                    "entity_registry": entity_registry,
                 },
             )
             result = self._validator.validate_measurements(raw, document_id)
             latency = time.time() - start
+            self._print_stage_complete(
+                stage_index=stage_index,
+                stage_name="Measurement Extraction",
+                latency=latency,
+                tokens=token_usage.total_tokens,
+                count=len(result.measurements),
+                count_label="Measurements",
+            )
             logger.info(
                 "extraction_stage_complete",
                 stage="measurement_extraction",
                 document_id=document_id,
                 count=len(result.measurements),
                 latency_seconds=round(latency, 3),
+                tokens=token_usage.total_tokens,
             )
-            return result, latency
+            return result, latency, token_usage
 
         except Exception as e:
             latency = time.time() - start
+            self._print_stage_failed(stage_index, "Measurement Extraction", latency, str(e))
             logger.error(
                 "extraction_stage_failed",
                 stage="measurement_extraction",
@@ -486,49 +589,66 @@ class ExtractionService:
                 error=str(e),
                 latency_seconds=round(latency, 3),
             )
-            return MeasurementExtractionResult(measurements=[]), latency
+            return MeasurementExtractionResult(measurements=[]), latency, TokenUsage.zero()
 
     async def _run_stage_procedures(
         self,
         document_id: str,
         document_text: str,
-    ) -> tuple[ProcedureExtractionResult, float]:
+        entity_registry: str,
+        stage_index: int = 4,
+    ) -> Tuple[ProcedureExtractionResult, float, TokenUsage]:
         """
         Stage 4: Procedure Extraction.
 
         Extracts maintenance procedures, safety instructions, and workflows.
+        Receives entity registry for applies_to_entity ID consistency.
 
         Args:
             document_id: For logging
             document_text: Document text
+            entity_registry: JSON-serialized entity registry from Stage 1
+            stage_index: Display index for terminal output
 
         Returns:
-            Tuple of (ProcedureExtractionResult, latency_seconds)
+            Tuple of (ProcedureExtractionResult, latency_seconds, TokenUsage)
         """
         start = time.time()
+        self._print_stage_start(stage_index, "Procedure Extraction")
         logger.info("extraction_stage_start", stage="procedure_extraction", document_id=document_id)
 
         try:
-            raw = await self._llm.generate(
+            raw, token_usage = await self._llm.generate(
                 prompt_name="procedure_extraction",
                 variables={
                     "document_text": document_text,
                     "document_id": document_id,
+                    "entity_registry": entity_registry,
                 },
             )
             result = self._validator.validate_procedures(raw, document_id)
             latency = time.time() - start
+            self._print_stage_complete(
+                stage_index=stage_index,
+                stage_name="Procedure Extraction",
+                latency=latency,
+                tokens=token_usage.total_tokens,
+                count=len(result.procedures),
+                count_label="Procedures",
+            )
             logger.info(
                 "extraction_stage_complete",
                 stage="procedure_extraction",
                 document_id=document_id,
                 count=len(result.procedures),
                 latency_seconds=round(latency, 3),
+                tokens=token_usage.total_tokens,
             )
-            return result, latency
+            return result, latency, token_usage
 
         except Exception as e:
             latency = time.time() - start
+            self._print_stage_failed(stage_index, "Procedure Extraction", latency, str(e))
             logger.error(
                 "extraction_stage_failed",
                 stage="procedure_extraction",
@@ -536,38 +656,53 @@ class ExtractionService:
                 error=str(e),
                 latency_seconds=round(latency, 3),
             )
-            return ProcedureExtractionResult(procedures=[]), latency
+            return ProcedureExtractionResult(procedures=[]), latency, TokenUsage.zero()
 
     async def _run_stage_risks(
         self,
         document_id: str,
         document_text: str,
-    ) -> tuple[RiskExtractionResult, float]:
+        entity_registry: str,
+        stage_index: int = 5,
+    ) -> Tuple[RiskExtractionResult, float, TokenUsage]:
         """
         Stage 5: Risk Extraction.
 
         Identifies hazards, safety risks, failure modes, and compliance gaps.
+        Receives entity registry for applies_to_entity ID consistency.
 
         Args:
             document_id: For logging
             document_text: Document text
+            entity_registry: JSON-serialized entity registry from Stage 1
+            stage_index: Display index for terminal output
 
         Returns:
-            Tuple of (RiskExtractionResult, latency_seconds)
+            Tuple of (RiskExtractionResult, latency_seconds, TokenUsage)
         """
         start = time.time()
+        self._print_stage_start(stage_index, "Risk Extraction")
         logger.info("extraction_stage_start", stage="risk_extraction", document_id=document_id)
 
         try:
-            raw = await self._llm.generate(
+            raw, token_usage = await self._llm.generate(
                 prompt_name="risk_analysis",
                 variables={
                     "document_text": document_text,
                     "document_id": document_id,
+                    "entity_registry": entity_registry,
                 },
             )
             result = self._validator.validate_risks(raw, document_id)
             latency = time.time() - start
+            self._print_stage_complete(
+                stage_index=stage_index,
+                stage_name="Risk Extraction",
+                latency=latency,
+                tokens=token_usage.total_tokens,
+                count=len(result.risks),
+                count_label="Risks",
+            )
             logger.info(
                 "extraction_stage_complete",
                 stage="risk_extraction",
@@ -576,11 +711,13 @@ class ExtractionService:
                 warning_count=len(result.warnings),
                 compliance_gap_count=len(result.compliance_gaps),
                 latency_seconds=round(latency, 3),
+                tokens=token_usage.total_tokens,
             )
-            return result, latency
+            return result, latency, token_usage
 
         except Exception as e:
             latency = time.time() - start
+            self._print_stage_failed(stage_index, "Risk Extraction", latency, str(e))
             logger.error(
                 "extraction_stage_failed",
                 stage="risk_extraction",
@@ -588,14 +725,15 @@ class ExtractionService:
                 error=str(e),
                 latency_seconds=round(latency, 3),
             )
-            return RiskExtractionResult(risks=[], warnings=[], compliance_gaps=[]), latency
+            return RiskExtractionResult(risks=[], warnings=[], compliance_gaps=[]), latency, TokenUsage.zero()
 
     async def _run_stage_summary(
         self,
         document_id: str,
         document_text: str,
         filename: str,
-    ) -> tuple[DocumentSummaryResult, float]:
+        stage_index: int = 6,
+    ) -> Tuple[DocumentSummaryResult, float, TokenUsage]:
         """
         Stage 6: Document Summary Generation.
 
@@ -605,15 +743,17 @@ class ExtractionService:
             document_id: For logging
             document_text: Document text
             filename: Original filename for context
+            stage_index: Display index for terminal output
 
         Returns:
-            Tuple of (DocumentSummaryResult, latency_seconds)
+            Tuple of (DocumentSummaryResult, latency_seconds, TokenUsage)
         """
         start = time.time()
+        self._print_stage_start(stage_index, "Summary Generation")
         logger.info("extraction_stage_start", stage="summary_generation", document_id=document_id)
 
         try:
-            raw = await self._llm.generate(
+            raw, token_usage = await self._llm.generate(
                 prompt_name="summary",
                 variables={
                     "document_text": document_text,
@@ -622,6 +762,12 @@ class ExtractionService:
             )
             result = self._validator.validate_summary(raw, document_id)
             latency = time.time() - start
+            self._print_stage_complete(
+                stage_index=stage_index,
+                stage_name="Summary Generation",
+                latency=latency,
+                tokens=token_usage.total_tokens,
+            )
             logger.info(
                 "extraction_stage_complete",
                 stage="summary_generation",
@@ -629,11 +775,13 @@ class ExtractionService:
                 summary_length=len(result.summary),
                 keyword_count=len(result.keywords),
                 latency_seconds=round(latency, 3),
+                tokens=token_usage.total_tokens,
             )
-            return result, latency
+            return result, latency, token_usage
 
         except Exception as e:
             latency = time.time() - start
+            self._print_stage_failed(stage_index, "Summary Generation", latency, str(e))
             logger.error(
                 "extraction_stage_failed",
                 stage="summary_generation",
@@ -641,27 +789,33 @@ class ExtractionService:
                 error=str(e),
                 latency_seconds=round(latency, 3),
             )
-            return DocumentSummaryResult(), latency
+            return DocumentSummaryResult(), latency, TokenUsage.zero()
 
     async def _run_stage_ontology(
         self,
         document_id: str,
         document_text: str,
-    ) -> tuple[OntologyDiscoveryResult, float]:
+        entity_registry: str,
+        stage_index: int = 7,
+    ) -> Tuple[OntologyDiscoveryResult, float, TokenUsage]:
         """
         Stage 7: Ontology Discovery.
 
         Suggests new entity types and concepts not in the current core ontology.
         These suggestions are passed to Epic 4 (Ontology Management) for validation.
+        Receives entity registry so it knows what types are already known.
 
         Args:
             document_id: For logging
             document_text: Document text
+            entity_registry: JSON-serialized entity registry from Stage 1
+            stage_index: Display index for terminal output
 
         Returns:
-            Tuple of (OntologyDiscoveryResult, latency_seconds)
+            Tuple of (OntologyDiscoveryResult, latency_seconds, TokenUsage)
         """
         start = time.time()
+        self._print_stage_start(stage_index, "Ontology Discovery")
         logger.info("extraction_stage_start", stage="ontology_discovery", document_id=document_id)
 
         # Current core ontology description for the prompt
@@ -674,26 +828,37 @@ class ExtractionService:
         )
 
         try:
-            raw = await self._llm.generate(
+            raw, token_usage = await self._llm.generate(
                 prompt_name="ontology_discovery",
                 variables={
                     "document_text": document_text,
                     "current_ontology": current_ontology,
+                    "entity_registry": entity_registry,
                 },
             )
             result = self._validator.validate_ontology_discovery(raw, document_id)
             latency = time.time() - start
+            self._print_stage_complete(
+                stage_index=stage_index,
+                stage_name="Ontology Discovery",
+                latency=latency,
+                tokens=token_usage.total_tokens,
+                count=len(result.new_concepts),
+                count_label="New Concepts",
+            )
             logger.info(
                 "extraction_stage_complete",
                 stage="ontology_discovery",
                 document_id=document_id,
                 new_concepts=len(result.new_concepts),
                 latency_seconds=round(latency, 3),
+                tokens=token_usage.total_tokens,
             )
-            return result, latency
+            return result, latency, token_usage
 
         except Exception as e:
             latency = time.time() - start
+            self._print_stage_failed(stage_index, "Ontology Discovery", latency, str(e))
             logger.error(
                 "extraction_stage_failed",
                 stage="ontology_discovery",
@@ -701,7 +866,7 @@ class ExtractionService:
                 error=str(e),
                 latency_seconds=round(latency, 3),
             )
-            return OntologyDiscoveryResult(new_concepts=[]), latency
+            return OntologyDiscoveryResult(new_concepts=[]), latency, TokenUsage.zero()
 
     # -----------------------------------------------
     # Helpers
@@ -767,6 +932,31 @@ class ExtractionService:
 
         return full_text.strip()
 
+    @staticmethod
+    def _build_entity_registry(entities: List[ExtractedEntity]) -> str:
+        """
+        Build a serialized entity registry from the extracted entity list.
+
+        This registry is passed to Stages 2–7 so the LLM can reference
+        canonical entity IDs instead of inventing new ones.
+
+        Args:
+            entities: Extracted entities from Stage 1
+
+        Returns:
+            JSON string of the entity registry
+        """
+        registry = [
+            {
+                "entity_id": e.entity_id,
+                "label": e.label,
+                "entity_type": e.entity_type,
+                "aliases": e.aliases,
+            }
+            for e in entities
+        ]
+        return json.dumps(registry, indent=2)
+
     def _update_status(
         self,
         document_id: str,
@@ -797,3 +987,113 @@ class ExtractionService:
                 status=status,
                 error=str(e),
             )
+
+    # -----------------------------------------------
+    # Terminal Output Helpers (Bug 3)
+    # -----------------------------------------------
+
+    @staticmethod
+    def _print_pipeline_header(filename: str) -> None:
+        """
+        Print the extraction pipeline start banner to terminal.
+
+        Args:
+            filename: Document filename or ID for display
+        """
+        print(f"\n{'='*52}")
+        print(f"  Document: {filename}")
+        print(f"  Knowledge Extraction Started")
+        print(f"{'='*52}\n")
+
+    @staticmethod
+    def _print_stage_start(stage_index: int, stage_name: str) -> None:
+        """
+        Print stage start line to terminal.
+
+        Args:
+            stage_index: 1-based stage number
+            stage_name: Human-readable stage name
+        """
+        print(f"[{stage_index}/{TOTAL_STAGES}] {stage_name}")
+        print(f"  Started...")
+
+    @staticmethod
+    def _print_stage_complete(
+        stage_index: int,
+        stage_name: str,
+        latency: float,
+        tokens: int,
+        count: Optional[int] = None,
+        count_label: Optional[str] = None,
+        confidence: Optional[float] = None,
+    ) -> None:
+        """
+        Print stage completion details to terminal.
+
+        Args:
+            stage_index: 1-based stage number
+            stage_name: Human-readable stage name
+            latency: Stage duration in seconds
+            tokens: Total tokens consumed by this stage
+            count: Number of items extracted (optional)
+            count_label: Label for the count (e.g., "Entities", "Relationships")
+            confidence: Average confidence score (optional)
+        """
+        print(f"  ✓ Completed")
+        if count is not None and count_label:
+            print(f"  {count_label}: {count}")
+        if confidence is not None:
+            print(f"  Confidence: {confidence}")
+        if tokens:
+            print(f"  Tokens: {tokens}")
+        print(f"  Duration: {round(latency, 1)} sec")
+        print(f"{'-'*52}")
+
+    @staticmethod
+    def _print_stage_failed(
+        stage_index: int,
+        stage_name: str,
+        latency: float,
+        error: str,
+    ) -> None:
+        """
+        Print stage failure details to terminal.
+
+        Args:
+            stage_index: 1-based stage number
+            stage_name: Human-readable stage name
+            latency: Stage duration in seconds
+            error: Error message
+        """
+        print(f"  ✗ FAILED")
+        print(f"  Stage: {stage_name}")
+        print(f"  Reason: {error[:200]}")
+        print(f"  Duration: {round(latency, 1)} sec")
+        print(f"  Continuing with empty result for this stage.")
+        print(f"{'-'*52}")
+
+    @staticmethod
+    def _print_pipeline_summary(
+        total_duration: float,
+        overall_confidence: float,
+        accumulated_tokens: TokenUsage,
+        stage_latencies: Dict[str, float],
+    ) -> None:
+        """
+        Print the pipeline completion summary to terminal.
+
+        Args:
+            total_duration: Total pipeline duration in seconds
+            overall_confidence: Overall extraction confidence score
+            accumulated_tokens: Accumulated token usage across all stages
+            stage_latencies: Per-stage latencies dict
+        """
+        print(f"\n{'='*52}")
+        print(f"  Knowledge Extraction Finished")
+        print(f"  Total Time: {round(total_duration, 1)} sec")
+        print(f"  Total Prompt Tokens: {accumulated_tokens.prompt_tokens}")
+        print(f"  Total Completion Tokens: {accumulated_tokens.completion_tokens}")
+        print(f"  Total Tokens: {accumulated_tokens.total_tokens}")
+        print(f"  Estimated Cost: ${round(accumulated_tokens.estimated_cost_usd, 6)}")
+        print(f"  Overall Confidence: {overall_confidence}")
+        print(f"{'='*52}\n")

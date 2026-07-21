@@ -22,6 +22,10 @@ from app.events.inngest_client import InngestClient
 from app.services.upload_service import UploadService
 from app.services.document_service import DocumentService
 from app.services.extraction_service import ExtractionService
+from app.ontology.ontology_repository import OntologyRepository
+from app.ontology.ontology_manager import OntologyManager
+from app.graph.graph_repository import GraphRepository
+from app.graph.graph_service import GraphService
 
 
 # -----------------------------------------------
@@ -281,4 +285,65 @@ def get_extraction_service(
         storage_repo=storage_repo,
         document_repo=document_repo,
         inngest=inngest,
+    )
+
+
+# -----------------------------------------------
+# Ontology Management (Epic 4)
+# -----------------------------------------------
+
+def get_ontology_repository(
+    supabase: SupabaseClient = Depends(get_supabase_client),
+) -> OntologyRepository:
+    """Inject OntologyRepository."""
+    return OntologyRepository(supabase=supabase)
+
+
+def get_ontology_manager(
+    ontology_repo: OntologyRepository = Depends(get_ontology_repository),
+) -> OntologyManager:
+    """Inject OntologyManager."""
+    return OntologyManager(ontology_repo=ontology_repo)
+
+
+# -----------------------------------------------
+# Graph Builder (Epic 5)
+# -----------------------------------------------
+
+def get_graph_repository(
+    neo4j: Neo4jClient = Depends(get_neo4j_client),
+) -> GraphRepository:
+    """
+    Inject GraphRepository.
+
+    This is the ONLY Neo4j writer in the entire platform.
+
+    Args:
+        neo4j: Injected Neo4j client
+
+    Returns:
+        GraphRepository instance
+    """
+    return GraphRepository(neo4j=neo4j)
+
+
+def get_graph_service(
+    ontology_repo: OntologyRepository = Depends(get_ontology_repository),
+    graph_repo: GraphRepository = Depends(get_graph_repository),
+) -> GraphService:
+    """
+    Inject GraphService.
+
+    Orchestrates the NKO → Neo4j graph build pipeline.
+
+    Args:
+        ontology_repo: Repository to load the NKO from Supabase Storage
+        graph_repo: Repository to write nodes/relationships to Neo4j
+
+    Returns:
+        GraphService instance
+    """
+    return GraphService(
+        ontology_repo=ontology_repo,
+        graph_repo=graph_repo,
     )

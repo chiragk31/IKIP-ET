@@ -15,6 +15,7 @@ Responsibilities:
 - Parse and validate AI responses
 - Log all AI interactions with timing and status
 - Handle rate limiting and errors gracefully
+- Return token usage per call so callers can accumulate totals
 
 Rules:
 - AI only produces structured JSON.
@@ -25,13 +26,42 @@ Rules:
 """
 
 import time
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, Tuple
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.ai.prompt_manager import PromptManager
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass
+class TokenUsage:
+    """
+    Token usage metadata returned by a single LLM call.
+
+    Callers (ExtractionService) should accumulate these across stages
+    to build accurate total token counts for the CKO.
+    """
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        """Support accumulation with + operator."""
+        return TokenUsage(
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+            estimated_cost_usd=self.estimated_cost_usd + other.estimated_cost_usd,
+        )
+
+    @classmethod
+    def zero(cls) -> "TokenUsage":
+        """Return a zero-valued TokenUsage for accumulation start."""
+        return cls(prompt_tokens=0, completion_tokens=0, total_tokens=0, estimated_cost_usd=0.0)
 
 
 class LLMService:
@@ -105,9 +135,12 @@ class LLMService:
         prompt_name: str,
         variables: Dict[str, Any],
         system_prompt: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> Tuple[Dict[str, Any], TokenUsage]:
         """
         Generate a structured JSON response from Gemini.
+
+        Returns BOTH the parsed result and the token usage so callers
+        can accumulate token counts across multiple LLM stages.
 
         Args:
             prompt_name: Name of the prompt template to use (without .md extension)
@@ -115,7 +148,7 @@ class LLMService:
             system_prompt: Optional system-level instruction override
 
         Returns:
-            Parsed JSON response as dictionary
+            Tuple of (parsed JSON response dict, TokenUsage)
 
         Raises:
             ValueError: If response is not valid JSON or fails validation
@@ -141,16 +174,23 @@ class LLMService:
 
             # Extract token usage and compute cost
             prompt_tokens = 0
-            candidates_tokens = 0
+            completion_tokens = 0
             total_tokens = 0
             estimated_cost = 0.0
 
             if hasattr(response, "usage_metadata") and response.usage_metadata:
-                prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", 0)
-                candidates_tokens = getattr(response.usage_metadata, "candidates_token_count", 0)
-                total_tokens = getattr(response.usage_metadata, "total_token_count", 0)
+                prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+                completion_tokens = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
+                total_tokens = getattr(response.usage_metadata, "total_token_count", 0) or 0
                 # Gemini 2.5 Flash prices: $0.075/M input, $0.30/M output
-                estimated_cost = (prompt_tokens * 0.075 / 1_000_000) + (candidates_tokens * 0.30 / 1_000_000)
+                estimated_cost = (prompt_tokens * 0.075 / 1_000_000) + (completion_tokens * 0.30 / 1_000_000)
+
+            usage = TokenUsage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=round(estimated_cost, 6),
+            )
 
             duration = time.time() - start_time
             logger.info(
@@ -159,11 +199,11 @@ class LLMService:
                 model_name=self.model_name,
                 duration_ms=round(duration * 1000, 2),
                 prompt_tokens=prompt_tokens,
-                candidates_tokens=candidates_tokens,
+                completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
                 estimated_cost_usd=round(estimated_cost, 6),
             )
-            return result
+            return result, usage
 
         except Exception as e:
             duration = time.time() - start_time
