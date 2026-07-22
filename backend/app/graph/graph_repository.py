@@ -13,66 +13,43 @@ Critical rules:
  - Read queries come from graph_queries.py (parameterized only).
 
 Write semantics:
-  Node MERGE key    : entity_id
+  Node MERGE key    : entity_id (scoped per native label)
   Rel MERGE key     : (source_id, rel_type, target_id)
 
   ON CREATE SET  → sets creation-time provenance (source_document, created_at)
   ON MATCH SET   → updates confidence if the new value is higher (enrichment)
+
+Label handling:
+  Neo4j does not allow labels to be passed as query parameters. Since
+  every label used here is drawn exclusively from VALID_NODE_LABELS
+  (a closed, pre-validated set — never raw AI/user text), nodes are
+  grouped by label in Python and one MERGE query per label group is
+  executed with the label safely interpolated into the Cypher string.
+  This is the standard, safe pattern for Neo4j's label-parameterization
+  limitation and requires no APOC plugin.
 """
 
+from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import structlog
 
 from app.database.neo4j_client import Neo4jClient
 from app.graph.models import GraphNode, GraphRelationship
-from app.graph.constants import NODE_BATCH_SIZE, RELATIONSHIP_BATCH_SIZE
+from app.graph.constants import (
+    NODE_BATCH_SIZE,
+    RELATIONSHIP_BATCH_SIZE,
+    VALID_NODE_LABELS,
+    GRAPH_PIPELINE_VERSION,
+)
 from app.graph import graph_queries as Q
 
 logger = structlog.get_logger(__name__)
 
 # -------------------------------------------------------------------
-# Cypher templates (parameterized — never string-formatted)
+# Cypher templates (parameterized — never string-formatted, EXCEPT the
+# label token below, which is only ever drawn from VALID_NODE_LABELS)
 # -------------------------------------------------------------------
-
-_MERGE_NODE_CYPHER = """
-UNWIND $nodes AS n
-MERGE (node {entity_id: n.entity_id})
-ON CREATE SET
-    node.name              = n.name,
-    node.confidence        = n.confidence,
-    node.source_document   = n.source_document,
-    node.extraction_version = n.extraction_version,
-    node.created_at        = n.created_at,
-    node.aliases           = n.aliases,
-    node.properties        = n.properties
-ON MATCH SET
-    node.confidence = CASE
-        WHEN n.confidence > node.confidence THEN n.confidence
-        ELSE node.confidence
-    END
-WITH node, n
-CALL apoc.create.addLabels(node, [n.label]) YIELD node AS labeled_node
-RETURN count(labeled_node) AS merged
-"""
-
-# Fallback without APOC (Neo4j Aura Free may not have APOC)
-_MERGE_NODE_NO_APOC_CYPHER = """
-UNWIND $nodes AS n
-MERGE (node {entity_id: n.entity_id})
-ON CREATE SET
-    node.name              = n.name,
-    node.confidence        = n.confidence,
-    node.source_document   = n.source_document,
-    node.extraction_version = n.extraction_version,
-    node.created_at        = n.created_at,
-    node.aliases           = n.aliases
-ON MATCH SET
-    node.confidence = CASE
-        WHEN n.confidence > node.confidence THEN n.confidence
-        ELSE node.confidence
-    END
-RETURN count(node) AS merged
-"""
 
 _MERGE_RELATIONSHIP_CYPHER = """
 UNWIND $rels AS r
@@ -90,6 +67,16 @@ ON MATCH SET
         ELSE rel.confidence
     END
 RETURN count(rel) AS merged
+"""
+
+_MERGE_DOCUMENT_CYPHER = """
+MERGE (d:Document {entity_id: $document_id})
+ON CREATE SET
+    d.name               = $document_id,
+    d.entity_type        = 'Document',
+    d.created_at          = $created_at,
+    d.extraction_version = $extraction_version
+RETURN d.entity_id AS entity_id
 """
 
 
@@ -120,12 +107,41 @@ class GraphRepository:
     # Write operations
     # ------------------------------------------------------------------
 
+    def merge_document_node(self, document_id: str) -> None:
+        """
+        Ensure a :Document node exists for the given document_id.
+
+        Called once per graph build, before entity nodes are written,
+        so status/related-document queries (which MATCH on :Document)
+        succeed instead of warning on a missing label.
+
+        Args:
+            document_id: The document's entity_id (its Supabase document ID).
+        """
+        params = {
+            "document_id": document_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "extraction_version": GRAPH_PIPELINE_VERSION,
+        }
+        try:
+            self._neo4j.execute_query(_MERGE_DOCUMENT_CYPHER, params)
+            logger.info("document_node_merged", document_id=document_id)
+        except Exception as e:
+            logger.error(
+                "document_node_merge_failed",
+                document_id=document_id,
+                error=str(e),
+            )
+            raise
+
     def merge_nodes(self, nodes: List[GraphNode]) -> int:
         """
         Batch-MERGE a list of GraphNode objects into Neo4j.
 
-        Uses MERGE on entity_id — idempotent: re-running the same nodes
-        does not create duplicates.
+        Nodes are grouped by label (native Neo4j label, e.g. :Asset,
+        :Person) since labels cannot be passed as query parameters.
+        Each group is written with MERGE on entity_id — idempotent:
+        re-running the same nodes does not create duplicates.
 
         Args:
             nodes: Validated GraphNode objects to persist.
@@ -136,27 +152,45 @@ class GraphRepository:
         if not nodes:
             return 0
 
+        grouped: Dict[str, List[GraphNode]] = defaultdict(list)
+        for n in nodes:
+            grouped[n.label].append(n)
+
         total_merged = 0
-        for batch in self._batch(nodes, NODE_BATCH_SIZE):
-            params = {"nodes": [self._node_to_params(n) for n in batch]}
-            try:
-                results = self._neo4j.execute_query(
-                    _MERGE_NODE_NO_APOC_CYPHER, params
-                )
-                merged = results[0].get("merged", 0) if results else len(batch)
-                total_merged += merged
-                logger.debug(
-                    "node_batch_merged",
-                    batch_size=len(batch),
-                    merged=merged,
-                )
-            except Exception as e:
+        for label, label_nodes in grouped.items():
+            if label not in VALID_NODE_LABELS:
+                # Should never happen — GraphValidator rejects unknown
+                # labels before this point — but never interpolate an
+                # unvalidated string into Cypher, so hard-stop instead.
                 logger.error(
-                    "node_batch_merge_failed",
-                    batch_size=len(batch),
-                    error=str(e),
+                    "node_merge_rejected_invalid_label",
+                    label=label,
+                    count=len(label_nodes),
                 )
-                raise
+                continue
+
+            cypher = self._build_node_merge_cypher(label)
+
+            for batch in self._batch(label_nodes, NODE_BATCH_SIZE):
+                params = {"nodes": [self._node_to_params(n) for n in batch]}
+                try:
+                    results = self._neo4j.execute_query(cypher, params)
+                    merged = results[0].get("merged", 0) if results else len(batch)
+                    total_merged += merged
+                    logger.debug(
+                        "node_batch_merged",
+                        label=label,
+                        batch_size=len(batch),
+                        merged=merged,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "node_batch_merge_failed",
+                        label=label,
+                        batch_size=len(batch),
+                        error=str(e),
+                    )
+                    raise
 
         logger.info("nodes_merged_total", total_merged=total_merged, total_input=len(nodes))
         return total_merged
@@ -314,6 +348,37 @@ class GraphRepository:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_node_merge_cypher(label: str) -> str:
+        """
+        Build a MERGE query for a single, pre-validated node label.
+
+        `label` MUST already be checked against VALID_NODE_LABELS by the
+        caller before this is invoked — it is interpolated directly into
+        the Cypher string because Neo4j does not support parameterized
+        labels. This is safe only because the value space is a closed,
+        code-defined enum, never raw AI or user text.
+        """
+        return f"""
+UNWIND $nodes AS n
+MERGE (node:{label} {{entity_id: n.entity_id}})
+ON CREATE SET
+    node.name               = n.name,
+    node.entity_type        = n.label,
+    node.confidence         = n.confidence,
+    node.source_document    = n.source_document,
+    node.extraction_version = n.extraction_version,
+    node.created_at         = n.created_at,
+    node.aliases            = n.aliases,
+    node.properties         = n.properties
+ON MATCH SET
+    node.confidence = CASE
+        WHEN n.confidence > node.confidence THEN n.confidence
+        ELSE node.confidence
+    END
+RETURN count(node) AS merged
+"""
 
     @staticmethod
     def _batch(items: list, size: int):

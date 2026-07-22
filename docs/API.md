@@ -202,6 +202,54 @@ POST
 
 ---
 
+# Knowledge Extraction APIs
+
+## Trigger Extraction
+
+POST
+
+/api/v1/knowledge/{document_id}/extract
+
+Query Parameters
+
+canonical_storage_path (Required)
+
+*Note: For manual triggers, you must provide the exact storage path of the canonical JSON generated in Epic 2. Example: `documents/2026/07/9c0fc73c_canonical_1234.json`. You can find this path by checking the Supabase dashboard in the `documents` bucket.*
+
+original_filename (Optional)
+
+user_id (Optional)
+
+Returns
+
+202 Accepted (runs in background)
+
+---
+
+## Get Extraction Status
+
+GET
+
+/api/v1/knowledge/{document_id}
+
+Returns
+
+Processing status and metadata
+
+---
+
+## Get CKO JSON
+
+GET
+
+/api/v1/knowledge/{document_id}/cko
+
+Returns
+
+The full Canonical Knowledge Object
+
+---
+
 # Knowledge Graph APIs
 
 ## Graph Overview
@@ -255,6 +303,38 @@ Properties
 Neighbors
 
 Related Documents
+
+---
+
+# Embeddings APIs
+
+## Trigger Embeddings Pipeline
+
+POST
+
+/api/v1/embeddings/{document_id}/embed
+
+Query Parameters
+
+canonical_storage_path (Required)
+
+*Note: Like the extraction API, you must provide the exact canonical JSON storage path. Example: `documents/2026/07/9c0fc73c_canonical_1234.json`. Check the Supabase `documents` bucket if you don't have it.*
+
+Returns
+
+202 Accepted (runs in background)
+
+---
+
+## Get Embeddings Status
+
+GET
+
+/api/v1/embeddings/{document_id}/status
+
+Returns
+
+Pipeline progress (chunks generated, vectors upserted)
 
 ---
 

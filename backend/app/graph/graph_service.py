@@ -4,12 +4,13 @@ Graph Service
 Orchestrates the complete graph build pipeline for a single document:
 
     1. Load NKO from OntologyRepository (the persisted artifact from Epic 4)
-    2. NodeBuilder   → List[GraphNode]
-    3. RelationshipBuilder → List[GraphRelationship]
-    4. GraphValidator → ValidationResult (valid/invalid splits)
-    5. GraphRepository.merge_nodes()  (batch MERGE)
-    6. GraphRepository.merge_relationships()  (batch MERGE)
-    7. Return GraphBuildResult (counts + status)
+    2. Ensure a :Document node exists for this document_id
+    3. NodeBuilder   → List[GraphNode]
+    4. RelationshipBuilder → List[GraphRelationship]
+    5. GraphValidator → ValidationResult (valid/invalid splits)
+    6. GraphRepository.merge_nodes()  (batch MERGE)
+    7. GraphRepository.merge_relationships()  (batch MERGE)
+    8. Return GraphBuildResult (counts + status)
 
 Rules:
  - Never calls LLMService or any AI service.
@@ -104,20 +105,24 @@ class GraphService:
         )
 
         try:
-            # 2. Build nodes
+            # 2. Ensure a :Document node exists for this document
+            #    (so status / related-document queries resolve cleanly)
+            self._graph_repo.merge_document_node(document_id)
+
+            # 3. Build nodes
             nodes = self._node_builder.build(
                 entities=nko.entities,
                 document_id=document_id,
             )
 
-            # 3. Build relationships (uses nodes for referential integrity)
+            # 4. Build relationships (uses nodes for referential integrity)
             relationships = self._rel_builder.build(
                 relationships=nko.relationships,
                 nodes=nodes,
                 document_id=document_id,
             )
 
-            # 4. Validate entire graph (pre-insertion)
+            # 5. Validate entire graph (pre-insertion)
             validation = self._validator.validate(nodes, relationships)
 
             nodes_skipped = len(validation.invalid_nodes)
@@ -131,10 +136,10 @@ class GraphService:
                     rels_skipped=rels_skipped,
                 )
 
-            # 5. Write valid nodes to Neo4j (batch MERGE)
+            # 6. Write valid nodes to Neo4j (batch MERGE)
             nodes_written = self._graph_repo.merge_nodes(validation.valid_nodes)
 
-            # 6. Write valid relationships to Neo4j (batch MERGE)
+            # 7. Write valid relationships to Neo4j (batch MERGE)
             rels_written = self._graph_repo.merge_relationships(
                 validation.valid_relationships
             )

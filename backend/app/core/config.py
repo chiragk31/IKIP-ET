@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     # ------------------------------------------
     # Google Embeddings
     # ------------------------------------------
-    EMBEDDING_MODEL: str = "models/text-embedding-004"
-    EMBEDDING_DIMENSION: int = 768
+    EMBEDDING_MODEL: str = "models/gemini-embedding-001"  # AD-022: migrated from text-embedding-004
+    EMBEDDING_DIMENSION: int = 768  # MRL truncation via output_dimensionality=768
 
     # ------------------------------------------
     # Neo4j Aura (Knowledge Graph)

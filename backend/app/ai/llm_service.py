@@ -239,8 +239,22 @@ class LLMService:
                 model=settings.EMBEDDING_MODEL,
                 content=text,
                 task_type="retrieval_document",
+                output_dimensionality=settings.EMBEDDING_DIMENSION,  # AD-022: MRL 768-d truncation
             )
             embedding = result["embedding"]
+
+            # Fail loud if API returns a different dimension than config expects.
+            # This would indicate a model/config drift and must surface immediately,
+            # not silently produce wrong-shaped vectors that land in Pinecone.
+            # (AD-022: this pattern caught the text-embedding-004 → gemini-embedding-001
+            #  migration gap during live verification — not by the unit test suite.)
+            if len(embedding) != settings.EMBEDDING_DIMENSION:
+                raise ValueError(
+                    f"Embedding dimension mismatch: config expects "
+                    f"{settings.EMBEDDING_DIMENSION}d but model '{settings.EMBEDDING_MODEL}' "
+                    f"returned {len(embedding)}d. Update EMBEDDING_MODEL or "
+                    f"EMBEDDING_DIMENSION in config.py."
+                )
 
             duration = time.time() - start_time
             logger.info(

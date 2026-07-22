@@ -338,3 +338,38 @@ class InngestClient:
             payload=payload,
             user_id=user_id,
         )
+
+    def send_embeddings_created_event(
+        self,
+        document_id: str,
+        chunks_generated: int,
+        vectors_upserted: int,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Emit the `embeddings.created` event to trigger Epic 7 (AI Copilot/RAG).
+
+        This is the handoff from Epic 6 to Epic 7.
+        The Copilot/RAG module subscribes to this event.
+
+        Args:
+            document_id: Supabase document ID
+            chunks_generated: Total chunks produced for the document
+            vectors_upserted: Number of vectors successfully upserted to Pinecone
+            user_id: User ID (optional)
+
+        Returns:
+            True if event was sent successfully
+        """
+        payload = {
+            "document_id": document_id,
+            "chunks_generated": chunks_generated,
+            "vectors_upserted": vectors_upserted,
+            "user_id": user_id,
+        }
+
+        return self.send_event(
+            event_name="embeddings.created",
+            payload=payload,
+            user_id=user_id,
+        )

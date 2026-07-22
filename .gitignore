@@ -158,3 +158,8 @@ playwright-report/
 *.key
 *.cert
 secrets/
+
+
+docs/
+
+prompts/

@@ -26,6 +26,19 @@ from app.ontology.ontology_repository import OntologyRepository
 from app.ontology.ontology_manager import OntologyManager
 from app.graph.graph_repository import GraphRepository
 from app.graph.graph_service import GraphService
+from app.embeddings.pinecone_repository import PineconeRepository
+from app.embeddings.embedding_provider import GoogleEmbeddingProvider
+from app.embeddings.embedding_service import EmbeddingService
+from app.embeddings.search_service import SearchService as Epic6SearchService
+from app.search.search_validator import SearchValidator
+from app.search.query_processor import QueryProcessor
+from app.search.query_rewriter import QueryRewriter
+from app.search.semantic_search import SemanticSearch
+from app.search.metadata_filter import MetadataFilter
+from app.search.graph_search import GraphSearch
+from app.search.context_builder import ContextBuilder
+from app.search.reranker import Reranker
+from app.search.search_service import SearchService as HybridSearchService
 
 
 # -----------------------------------------------
@@ -346,4 +359,105 @@ def get_graph_service(
     return GraphService(
         ontology_repo=ontology_repo,
         graph_repo=graph_repo,
+    )
+
+
+# -----------------------------------------------
+# Pinecone Repository (Epic 6)
+# -----------------------------------------------
+
+def get_pinecone_repository() -> PineconeRepository:
+    """
+    Inject PineconeRepository.
+
+    This is the ONLY module that calls the Pinecone SDK directly.
+
+    Returns:
+        PineconeRepository instance.
+    """
+    pinecone_client = get_pinecone_client()
+    return PineconeRepository(pinecone_client=pinecone_client)
+
+
+# -----------------------------------------------
+# Embedding Service (Epic 6)
+# -----------------------------------------------
+
+def get_embedding_service(
+    storage_repo: StorageRepository = Depends(get_storage_repository),
+    ontology_repo: OntologyRepository = Depends(get_ontology_repository),
+    llm_service: LLMService = Depends(get_llm_service),
+    pinecone_repo: PineconeRepository = Depends(get_pinecone_repository),
+) -> EmbeddingService:
+    """
+    Inject EmbeddingService.
+
+    Orchestrates the CanonicalDocument → Pinecone embedding pipeline.
+
+    Args:
+        storage_repo: For loading the CanonicalDocument from Supabase Storage.
+        ontology_repo: For loading the NKO from Supabase Storage.
+        llm_service: For generating embeddings (routed through GoogleEmbeddingProvider).
+        pinecone_repo: For upserted embedded chunks to Pinecone.
+
+    Returns:
+        EmbeddingService instance.
+    """
+    embedding_provider = GoogleEmbeddingProvider(llm_service=llm_service)
+    return EmbeddingService(
+        storage_repo=storage_repo,
+        ontology_repo=ontology_repo,
+        embedding_provider=embedding_provider,
+        pinecone_repo=pinecone_repo,
+    )
+
+
+# -----------------------------------------------
+# Search Service (Epic 6)
+# -----------------------------------------------
+
+def get_search_service(
+    llm_service: LLMService = Depends(get_llm_service),
+    pinecone_repo: PineconeRepository = Depends(get_pinecone_repository),
+) -> Epic6SearchService:
+    """
+    Inject SearchService (Epic 6).
+    """
+    embedding_provider = GoogleEmbeddingProvider(llm_service=llm_service)
+    return Epic6SearchService(
+        embedding_provider=embedding_provider,
+        pinecone_repo=pinecone_repo,
+    )
+
+
+# -----------------------------------------------
+# Hybrid Search Service (Epic 7)
+# -----------------------------------------------
+
+def get_hybrid_search_service(
+    llm_service: LLMService = Depends(get_llm_service),
+    epic6_search_service: Epic6SearchService = Depends(get_search_service),
+    graph_repo: GraphRepository = Depends(get_graph_repository),
+) -> HybridSearchService:
+    """
+    Inject HybridSearchService (Epic 7 orchestrator).
+    """
+    validator = SearchValidator()
+    processor = QueryProcessor()
+    rewriter = QueryRewriter(llm_service=llm_service)
+    semantic = SemanticSearch(search_svc=epic6_search_service)
+    meta_filter = MetadataFilter()
+    graph_search = GraphSearch(graph_repo=graph_repo)
+    context_builder = ContextBuilder()
+    reranker = Reranker()
+
+    return HybridSearchService(
+        validator=validator,
+        processor=processor,
+        rewriter=rewriter,
+        semantic=semantic,
+        meta_filter=meta_filter,
+        graph_search=graph_search,
+        context_builder=context_builder,
+        reranker=reranker,
     )

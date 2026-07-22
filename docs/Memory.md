@@ -3,8 +3,8 @@
 # Industrial Knowledge Intelligence Platform (IKIP)
 
 Version: 1.0
-Last Updated: 2026-07-19
-Updated By: Agent (Foundation Phase)
+Last Updated: 2026-07-22
+Updated By: Agent (Phase 6 — Semantic Embeddings)
 
 ---
 
@@ -78,21 +78,33 @@ IKIP is an AI-powered Industrial Knowledge Intelligence Platform that transforms
 - **LLM**: Gemini 2.5 Flash (via dedicated `LLMService` only)
 - **OCR**: PaddleOCR (for scanned documents)
 - **Document Parsing**: Docling
-- **Embeddings**: Google text-embedding-004
+- **Embeddings**: Google gemini-embedding-001 (768-d via Matryoshka truncation, `output_dimensionality=768`)
 - **Prompts**: Stored as `.md` files in `backend/app/prompts/`; never hardcoded in Python
 
 ## Knowledge Graph
 
 - **Database**: Neo4j Aura (Free instance)
-- **Core Node Types**: Document, Asset, Person, Organization, Location, Procedure, Event, Measurement, Risk, Regulation, Concept (dynamic)
+- **Core Node Types**: Document, Asset, Person, Organization, Location, Procedure, Event, Measurement, Risk, Failure, Regulation, Concept (dynamic)
 - **Key Relationships**: `MENTIONS`, `HAS_FAILURE`, `LOCATED_IN`, `PERFORMED`, `HAS_MEASUREMENT`, `REFERENCES`, `CONNECTED_TO`, `RELATED_TO`, `CAUSED_BY`, `USES`, `REQUIRES`, `MITIGATED_BY`, `RECORDED_FOR`, `INVOLVES`, `OWNS`, `GENERATED_FROM`, `PART_OF`
 - **Rule**: LLM NEVER writes Cypher. LLM produces JSON → Graph Builder produces Cypher → Neo4j.
+- **Nodes carry native Neo4j labels** (e.g. `:Asset`, `:Person`) as of AD-021 — see Phase 5 record for the fix that made this true.
 
 ## Storage
 
 - **Supabase Storage**: Raw file storage (bucket: `documents`)
 - **Folder pattern**: `documents/{year}/{month}/{filename}`
 - **Supabase DB**: Document metadata, processing status, user authentication
+
+### Storage Path Reference
+*Note: Paths updated 2026-07-22 to reflect actual implementation in code rather than outdated design docs.*
+
+| Artifact Type | Component | Verified Path Template in Supabase Storage (`documents` bucket) |
+|---|---|---|
+| **Raw Upload** | Epic 1 | `documents/{year}/{month}/{random_prefix}_{original_filename}` |
+| **Canonical JSON** | Epic 2 | `documents/{year}/{month}/{random_prefix}_canonical_{document_id}.json` |
+| **CKO JSON** | Epic 3 | `knowledge/{document_id}/cko.json` |
+| **NKO JSON** | Epic 4 | `normalized/{document_id}/nko.json` |
+| **Chunks/Embeds** | Epic 6 | *Not stored as files; upserted directly to Pinecone* |
 
 ## Search
 
@@ -126,7 +138,7 @@ IKIP is an AI-powered Industrial Knowledge Intelligence Platform that transforms
 | LLM | Gemini 2.5 Flash |
 | OCR | PaddleOCR |
 | Document Parsing | Docling |
-| Embeddings | Google text-embedding-004 |
+| Embeddings | Google gemini-embedding-001 (768-d, MRL) |
 | Relational DB | Supabase (PostgreSQL) |
 | Auth | Supabase Auth (JWT) |
 | File Storage | Supabase Storage |
@@ -141,115 +153,114 @@ IKIP is an AI-powered Industrial Knowledge Intelligence Platform that transforms
 
 # Folder Structure
 
-```
 IndustrialKnowledgeIntelligence/
 ├── docs/
-│   ├── PRD.md
-│   ├── Architecture.md
-│   ├── Design.md
-│   ├── Database.md
-│   ├── API.md
-│   ├── Ontology.md
-│   ├── Rules.md
-│   ├── Prompts.md
-│   ├── Epics.md
-│   ├── Memory.md
-│   └── tasks/
-│       ├── 00-foundation.md
-│       ├── 01-upload.md
-│       ├── 02-processing.md
-│       ├── 03-ai-extraction.md
-│       ├── 04-ontology.md
-│       ├── 05-graph.md
-│       ├── 06-embeddings.md
-│       ├── 07-search.md
-│       ├── 08-copilot.md
-│       ├── 09-assets.md
-│       ├── 10-dashboard.md
-│       ├── 11-authentication.md
-│       └── 12-deployment.md
+│ ├── PRD.md
+│ ├── Architecture.md
+│ ├── Design.md
+│ ├── Database.md
+│ ├── API.md
+│ ├── Ontology.md
+│ ├── Rules.md
+│ ├── Prompts.md
+│ ├── Epics.md
+│ ├── Memory.md
+│ └── tasks/
+│ ├── 00-foundation.md
+│ ├── 01-upload.md
+│ ├── 02-processing.md
+│ ├── 03-ai-extraction.md
+│ ├── 04-ontology.md
+│ ├── 05-graph.md
+│ ├── 06-embeddings.md
+│ ├── 07-search.md
+│ ├── 08-copilot.md
+│ ├── 09-assets.md
+│ ├── 10-dashboard.md
+│ ├── 11-authentication.md
+│ └── 12-deployment.md
 ├── frontend/
-│   ├── app/
-│   ├── components/
-│   ├── features/
-│   │   ├── upload/
-│   │   ├── dashboard/
-│   │   ├── graph/
-│   │   ├── chat/
-│   │   ├── assets/
-│   │   ├── documents/
-│   │   └── compliance/
-│   ├── hooks/
-│   ├── services/
-│   ├── store/
-│   ├── types/
-│   ├── utils/
-│   ├── styles/
-│   └── public/
+│ ├── app/
+│ ├── components/
+│ ├── features/
+│ │ ├── upload/
+│ │ ├── dashboard/
+│ │ ├── graph/
+│ │ ├── chat/
+│ │ ├── assets/
+│ │ ├── documents/
+│ │ └── compliance/
+│ ├── hooks/
+│ ├── services/
+│ ├── store/
+│ ├── types/
+│ ├── utils/
+│ ├── styles/
+│ └── public/
 ├── backend/
-│   └── app/
-│       ├── api/
-│       │   └── v1/
-│       │       ├── auth.py
-│       │       ├── documents.py
-│       │       ├── graph.py
-│       │       ├── assets.py
-│       │       ├── search.py
-│       │       ├── chat.py
-│       │       ├── compliance.py
-│       │       ├── maintenance.py
-│       │       ├── dashboard.py
-│       │       ├── users.py
-│       │       ├── notifications.py
-│       │       ├── admin.py
-│       │       └── health.py
-│       ├── core/
-│       │   ├── config.py
-│       │   ├── logger.py
-│       │   └── dependencies.py
-│       ├── database/
-│       │   ├── supabase.py
-│       │   ├── neo4j.py
-│       │   └── pinecone.py
-│       ├── services/
-│       ├── repositories/
-│       ├── schemas/
-│       ├── models/
-│       ├── parser/
-│       ├── ocr/
-│       ├── ontology/
-│       │   ├── ontology_manager.py
-│       │   ├── entity_mapper.py
-│       │   ├── synonym_resolver.py
-│       │   ├── relationship_builder.py
-│       │   ├── ontology_rules.py
-│       │   ├── validators.py
-│       │   └── models.py
-│       ├── graph/
-│       ├── rag/
-│       ├── events/
-│       ├── ai/
-│       │   ├── llm_service.py
-│       │   ├── prompt_manager.py
-│       │   └── response_parser.py
-│       ├── prompts/
-│       │   ├── system.md
-│       │   ├── entity_extraction.md
-│       │   ├── relationship_extraction.md
-│       │   ├── ontology_discovery.md
-│       │   ├── summary.md
-│       │   ├── compliance.md
-│       │   ├── maintenance.md
-│       │   ├── asset_summary.md
-│       │   ├── semantic_search.md
-│       │   ├── chat.md
-│       │   └── query_rewrite.md
-│       └── utils/
+│ └── app/
+│ ├── api/
+│ │ └── v1/
+│ │ ├── auth.py
+│ │ ├── documents.py
+│ │ ├── graph.py
+│ │ ├── assets.py
+│ │ ├── search.py
+│ │ ├── chat.py
+│ │ ├── compliance.py
+│ │ ├── maintenance.py
+│ │ ├── dashboard.py
+│ │ ├── users.py
+│ │ ├── notifications.py
+│ │ ├── admin.py
+│ │ └── health.py
+│ ├── core/
+│ │ ├── config.py
+│ │ ├── logger.py
+│ │ └── dependencies.py
+│ ├── database/
+│ │ ├── supabase.py
+│ │ ├── neo4j.py
+│ │ └── pinecone.py
+│ ├── services/
+│ ├── repositories/
+│ ├── schemas/
+│ ├── models/
+│ ├── parser/
+│ ├── ocr/
+│ ├── ontology/
+│ │ ├── ontology_manager.py
+│ │ ├── entity_mapper.py
+│ │ ├── synonym_resolver.py
+│ │ ├── relationship_builder.py
+│ │ ├── ontology_rules.py
+│ │ ├── validators.py
+│ │ └── models.py
+│ ├── graph/
+│ ├── rag/
+│ ├── events/
+│ ├── ai/
+│ │ ├── llm_service.py
+│ │ ├── prompt_manager.py
+│ │ └── response_parser.py
+│ ├── prompts/
+│ │ ├── system.md
+│ │ ├── entity_extraction.md
+│ │ ├── relationship_extraction.md
+│ │ ├── ontology_discovery.md
+│ │ ├── summary.md
+│ │ ├── compliance.md
+│ │ ├── maintenance.md
+│ │ ├── asset_summary.md
+│ │ ├── semantic_search.md
+│ │ ├── chat.md
+│ │ └── query_rewrite.md
+│ └── utils/
 ├── scripts/
 ├── docker/
 └── .github/
-    └── workflows/
-```
+└── workflows/
+
 
 ---
 
@@ -271,7 +282,7 @@ IndustrialKnowledgeIntelligence/
 
 **Responsibility**: All organizational knowledge (entities, relationships, ontology)
 
-Core Node Labels: `Document`, `Asset`, `Person`, `Organization`, `Location`, `Procedure`, `Event`, `Measurement`, `Risk`, `Failure`, `Regulation`, `Concept`
+Core Node Labels (native Neo4j labels, verified live as of AD-021): `Document`, `Asset`, `Person`, `Organization`, `Location`, `Procedure`, `Event`, `Measurement`, `Risk`, `Failure`, `Regulation`, `Concept`
 
 Key Relationship Types: `MENTIONS`, `HAS_FAILURE`, `LOCATED_IN`, `PERFORMED`, `HAS_MEASUREMENT`, `REFERENCES`, `CONNECTED_TO`, `RELATED_TO`, `CAUSED_BY`, `USES`, `REQUIRES`, `MITIGATED_BY`, `RECORDED_FOR`, `INVOLVES`, `OWNS`, `GENERATED_FROM`, `PART_OF`
 
@@ -322,25 +333,21 @@ Key Relationship Types: `MENTIONS`, `HAS_FAILURE`, `LOCATED_IN`, `PERFORMED`, `H
 
 ## Processing Flow (triggered on `document.uploaded` event)
 
-```
-1. Document Parsing (Docling) → extracts text, headings, tables, images, metadata
-2. OCR (PaddleOCR) → if scanned document
-3. Knowledge Extraction (Gemini via LLMService) → entities, relationships, measurements, procedures, risks
-4. Ontology Manager → normalize, deduplicate, validate new concepts
-5. Graph Builder → create/merge nodes and relationships in Neo4j
-6. Chunk Generator → split document into 800-1200 token chunks with overlap
-7. Embedding Generator (Google text-embedding-004) → embed each chunk
-8. Pinecone → store vectors with metadata
-9. Summary Generator (Gemini) → document summary, keywords, topics
-10. Compliance Agent (Gemini) → detect missing approvals, expired certs
-11. Status Update → mark document as `ready` in Supabase
-```
+
+Document Parsing (Docling) → extracts text, headings, tables, images, metadata
+OCR (PaddleOCR) → if scanned document
+Knowledge Extraction (Gemini via LLMService) → entities, relationships, measurements, procedures, risks
+Ontology Manager → normalize, deduplicate, validate new concepts
+Graph Builder → create/merge nodes and relationships in Neo4j
+Chunk Generator → split document into 800-1200 token chunks with overlap
+Embedding Generator (Google text-embedding-004) → embed each chunk
+Pinecone → store vectors with metadata
+Summary Generator (Gemini) → document summary, keywords, topics
+Compliance Agent (Gemini) → detect missing approvals, expired certs
+Status Update → mark document as ready in Supabase
+
 
 ## Query Flow (RAG)
-
-```
-User Question → Embedding → Pinecone (top-K chunks) → Neo4j (related entities) → Combine context → Gemini → Answer + Citations + Confidence
-```
 
 ## LLM Rules
 
@@ -379,6 +386,8 @@ User Question → Embedding → Pinecone (top-K chunks) → Neo4j (related entit
 | GET | /graph | Graph overview |
 | GET | /graph/nodes | Graph explorer |
 | GET | /graph/node/{id} | Node details |
+| POST | /graph/{document_id}/build | Manually trigger graph build for a document |
+| GET | /graph/{document_id}/status | Check whether a document has been graphed |
 | GET | /assets | Asset list |
 | GET | /assets/{id} | Asset 360 |
 | POST | /search | Semantic search |
@@ -459,6 +468,7 @@ User Question → Embedding → Pinecone (top-K chunks) → Neo4j (related entit
 10. **No Stack Traces**: Never expose stack traces in API responses.
 11. **Type Safety**: TypeScript with strict mode; Pydantic models in Python.
 12. **No Random Folders**: Always follow Architecture.md structure.
+13. **Neo4j Label Safety**: Native Neo4j labels are never built from raw AI/user text. Labels are only ever interpolated into Cypher after being checked against a closed, code-defined enum (`VALID_NODE_LABELS`). See AD-021.
 
 ---
 
@@ -521,7 +531,7 @@ User Question → Embedding → Pinecone (top-K chunks) → Neo4j (related entit
 | 2 | Document Processing Pipeline | ✅ Completed |
 | 3 | AI Knowledge Extraction | ✅ Completed |
 | 4 | Ontology Management | ✅ Completed |
-| 5 | Knowledge Graph | ✅ Completed |
+| 5 | Knowledge Graph | ✅ Completed (native labels verified live — AD-021) |
 | 6 | Embeddings & Semantic Search | 🔲 Next |
 | 7 | AI Copilot (RAG) | 🔲 Planned |
 | 8 | Asset Intelligence | 🔲 Planned |
@@ -593,20 +603,19 @@ Epic 1 fully implemented: a robust, asynchronous document upload system with val
 
 ## Upload Workflow
 
-```
-1. User selects files (drag & drop or click-to-browse)
-2. Client validates file size and type (before sending to backend)
-3. POST /api/v1/documents/upload (multipart/form-data)
-4. UploadService.validate_file() — extension, MIME, size checks
-5. StorageRepository.upload_file() → Supabase Storage bucket: `documents`
-   Path pattern: documents/{year}/{month}/{uuid}_{filename}
-6. DocumentRepository.create() → Supabase DB `documents` table
-   Status: queued
-7. InngestClient.send_document_uploaded_event() → emits `document.uploaded`
-   Payload: document_id, storage_path, mime_type, file_size, original_filename
-8. API returns 202 Accepted immediately
-9. Frontend polls GET /api/v1/documents/{id}/status every 3s
-```
+User selects files (drag & drop or click-to-browse)
+Client validates file size and type (before sending to backend)
+POST /api/v1/documents/upload (multipart/form-data)
+UploadService.validate_file() — extension, MIME, size checks
+StorageRepository.upload_file() → Supabase Storage bucket: documents
+Path pattern: documents/{year}/{month}/{uuid}_{filename}
+DocumentRepository.create() → Supabase DB documents table
+Status: queued
+InngestClient.send_document_uploaded_event() → emits document.uploaded
+Payload: document_id, storage_path, mime_type, file_size, original_filename
+API returns 202 Accepted immediately
+Frontend polls GET /api/v1/documents/{id}/status every 3s
+
 
 ## API Endpoints Added
 
@@ -718,6 +727,7 @@ All AI prompts stored as versioned `.md` files in `backend/app/prompts/`. Prompt
 2. Read the specific task file in `docs/tasks/` for the epic you are implementing.
 3. Review `docs/Rules.md` — violations cause rejections.
 4. Never modify architecture without updating `docs/Architecture.md` and this file.
+5. **Do not trust "all tests pass" alone as proof a live-integration module (Neo4j, Supabase Storage, Pinecone) actually works.** Unit test suites in this project intentionally mock external databases (see `test_graph.py`) to stay fast and dependency-free. Passing unit tests confirms logic correctness in isolation, not that a live write/read against the real service succeeds. Always do at least one live verification pass (trigger the real endpoint, inspect the real database) before marking a phase complete. Phase 5 shipped with passing tests but a live-only bug (AD-021) that unit tests could not have caught, because the mock never exercised real Cypher label semantics.
 
 ## Critical Rules to Remember
 
@@ -728,6 +738,7 @@ All AI prompts stored as versioned `.md` files in `backend/app/prompts/`. Prompt
 - **AI output is JSON only.** Backend validates everything. Never trust raw AI output.
 - **Prompts are `.md` files.** Never hardcode prompts in Python.
 - **TypeScript only on frontend.** No `.js` files allowed.
+- **Neo4j labels are never parameterized** — Cypher doesn't support it. When a label must be built into a query string, it must first be checked against a closed enum (`VALID_NODE_LABELS`). See AD-021 for the reference implementation.
 
 ## Development Environment
 
@@ -762,24 +773,23 @@ Epic 2 fully implemented: an event-driven, multi-stage document processing pipel
 
 ## Architecture
 
-```
 document.uploaded (event)
-       ↓
+↓
 ProcessingHandler (async, runs in thread pool executor)
-       ↓
+↓
 ProcessingService.process_document()
-  ├── DocumentDetector  → selects parser + OCR flag
-  ├── DocumentLoader    → downloads from Supabase Storage to temp file
-  ├── DoclingParser     → PDF/DOCX/PPTX: pages, sections, tables, images
-  │   SpreadsheetParser → XLSX/CSV: tables + text
-  │   TextParser        → TXT: passthrough
-  │   (Image→OCR)       → PNG/JPG/TIFF: empty shell, then OCR fills it
-  ├── OCRService        → PaddleOCR (primary) / pytesseract (fallback) / none
-  ├── CanonicalBuilder  → merge OCR + normalize + rebuild full_text
-  ├── StorageRepository → store canonical JSON at processed/{id}/canonical.json
-  ├── DocumentRepository → update status at every stage
-  └── InngestClient     → emit document.processed
-```
+├── DocumentDetector → selects parser + OCR flag
+├── DocumentLoader → downloads from Supabase Storage to temp file
+├── DoclingParser → PDF/DOCX/PPTX: pages, sections, tables, images
+│ SpreadsheetParser → XLSX/CSV: tables + text
+│ TextParser → TXT: passthrough
+│ (Image→OCR) → PNG/JPG/TIFF: empty shell, then OCR fills it
+├── OCRService → PaddleOCR (primary) / pytesseract (fallback) / none
+├── CanonicalBuilder → merge OCR + normalize + rebuild full_text
+├── StorageRepository → store canonical JSON at documents/{year}/{month}/{random_prefix}_canonical_{id}.json
+├── DocumentRepository → update status at every stage
+└── InngestClient → emit document.processed
+
 
 ## Files Created
 
@@ -845,7 +855,7 @@ ProcessingService.process_document()
 }
 ```
 
-Canonical JSON is stored at: `processed/{document_id}/canonical.json` in Supabase Storage.
+Canonical JSON is stored at: `documents/{year}/{month}/{random_prefix}_canonical_{document_id}.json` in Supabase Storage.
 
 ## API Endpoint Added
 
@@ -862,7 +872,7 @@ PaddleOCR has a numpy 2.x ABI conflict in the current environment (compiled agai
 Rather than using a separate paid service to classify PDFs as scanned vs. digital, we use a character-density heuristic: if average chars/page < 100 after Docling extraction, the PDF is flagged as likely scanned and OCR is triggered. This is free and works well in practice.
 
 ### AD-013: Canonical JSON Stored in Supabase Storage (not DB)
-The canonical JSON can be several MB for large documents. Storing it in Supabase Storage (at `processed/{id}/canonical.json`) avoids hitting Supabase DB column size limits and allows streaming access by downstream modules. DB only stores metadata and status.
+The canonical JSON can be several MB for large documents. Storing it in Supabase Storage (at `documents/{year}/{month}/{random_prefix}_canonical_{id}.json`) avoids hitting Supabase DB column size limits and allows streaming access by downstream modules. DB only stores metadata and status.
 
 ### AD-014: Processing Handler Runs in Thread Pool Executor
 Docling and OCR are CPU-bound and synchronous. The `processing_handler.py` uses `asyncio.get_event_loop().run_in_executor(None, ...)` to avoid blocking FastAPI's async event loop. This allows concurrent upload handling while processing happens in worker threads.
@@ -902,72 +912,22 @@ Epic 3 fully implemented: A multi-stage AI extraction pipeline leveraging Gemini
 
 ## Architecture
 
-```
-document.processed (event)
-       ↓
-KnowledgeHandler (async)
-       ↓
-ExtractionService.extract()
-  ├── LLMService (w/ PromptManager)
-  │     ├── entity_extraction
-  │     ├── relationship_extraction
-  │     ├── measurement_extraction
-  │     ├── procedure_extraction
-  │     ├── risk_analysis
-  │     ├── summary
-  │     └── ontology_discovery
-  ├── AIValidator (JSON parsing + schema validation + deduplication)
-  ├── KnowledgeRepository (store CKO json + DB metadata)
-  └── InngestClient (emit knowledge.extracted)
-```
-
-## Files Created/Modified
-
-**Backend**
-| File | Purpose |
-|---|---|
-| `backend/app/prompts/*.md` | Prompt templates for 7 extraction stages |
-| `backend/app/schemas/knowledge.py` | CanonicalKnowledgeObject (CKO) and Pydantic schema validation |
-| `backend/app/ai/validator.py` | JSON parsing, Pydantic validation, Deduplication, Confidence Scoring |
-| `backend/app/repositories/knowledge_repository.py` | CKO JSON storage (Storage) & Knowledge Record tracking (DB) |
-| `backend/app/services/extraction_service.py` | Pipeline orchestration, graceful degradation |
-| `backend/app/events/knowledge_handler.py` | Event listener for `document.processed` |
-| `backend/app/api/v1/knowledge.py` | Knowledge API endpoints |
-| `backend/app/ai/llm_service.py` (updated) | Added LLM observability, token usage, cost estimation |
-| `backend/tests/test_extraction.py` | 60+ robust integration/unit tests for entire pipeline |
-
-## Database Additions
-- `docs/migrations/002_knowledge_extractions.sql` (Creates `knowledge_extractions` table tracking AI pipeline runs).
-
-## Canonical Knowledge Object (CKO)
-The CKO acts as the complete, validated payload passed downstream, containing lists of `ExtractedEntity`, `ExtractedRelationship`, `ExtractedMeasurement`, etc., with confidence scores and latency metrics.
-
----
-
-# Epic 4: Ontology Management (COMPLETED)
-
-Epic 4 implements the Ontology Management and Normalization pipeline. It transforms raw Canonical Knowledge Objects (CKO) into Normalized Knowledge Objects (NKO) ready for graph ingestion.
-
-## Architecture
-
-```
 knowledge.extracted (event)
-       ↓
+↓
 OntologyHandler (async)
-       ↓
+↓
 OntologyManager.process()
-  ├── EntityMapper (deduplication)
-  │     ├── SynonymResolver
-  │     └── AliasResolver
-  ├── RelationshipValidator (referential integrity)
-  ├── OntologyDiscovery (filtering core concepts)
-  ├── OntologyRepository (save new concepts for review)
-  └── OntologyValidator (final sanity check)
-       ↓
-NKO Created
-       ↓
-InngestClient (emit ontology.updated)
-```
+├── EntityMapper (deduplication)
+│ ├── SynonymResolver
+│ └── AliasResolver
+├── RelationshipValidator (referential integrity)
+├── OntologyDiscovery (filtering core concepts)
+├── OntologyRepository (persist NKO + save new concepts for review)
+└── OntologyValidator (final sanity check)
+↓
+NKO Created + Persisted
+↓
+InngestClient (emit ontology.updated, includes nko_storage_path)
 
 ## Files Created/Modified
 
@@ -981,45 +941,54 @@ InngestClient (emit ontology.updated)
 | `backend/app/ontology/entity_mapper.py` | Apply synonyms, aliases, and merge duplicate entities |
 | `backend/app/ontology/relationship_validator.py` | Ensure referential integrity and valid relations |
 | `backend/app/ontology/ontology_discovery.py` | Filter out new concepts that are already core |
-| `backend/app/ontology/ontology_repository.py` | Save newly discovered concepts to Supabase |
+| `backend/app/ontology/ontology_repository.py` | Save/load persisted NKO JSON to Supabase Storage (`normalized/{id}/nko.json`); save newly discovered concepts to Supabase DB |
 | `backend/app/ontology/ontology_validator.py` | Final validation of NKO |
-| `backend/app/ontology/ontology_manager.py` | Orchestration of all normalization modules |
-| `backend/app/events/ontology_handler.py` | Event listener for `knowledge.extracted` |
+| `backend/app/ontology/ontology_manager.py` | Orchestration of all normalization modules; persists NKO via `save_nko()` after validation passes |
+| `backend/app/events/ontology_handler.py` | Event listener for `knowledge.extracted`; includes `nko_storage_path` in the `ontology.updated` payload |
 | `backend/app/api/v1/ontology.py` | API endpoint to manually trigger normalization |
 | `backend/tests/test_ontology.py` | Unit tests for ontology logic |
 
 ## Database Additions
 - `docs/migrations/003_ontology_concepts.sql` (Creates `ontology_concepts` table for discovered entities requiring human review).
 
+## Post-Completion Fix (2026-07-21)
+
+**Bug found during Phase 5 integration**: `OntologyManager.process()` originally built and validated the NKO but never persisted it — only `save_discovered_concepts()` was called. `ontology_handler.py` emitted `ontology.updated` with no way for downstream consumers to load the actual NKO. Discovered when verifying the Ontology→Graph handoff before starting Epic 5, not caught by automated tests since none of them asserted persistence occurred.
+
+**Fix applied**: Added `save_nko()` / `load_nko()` to `OntologyRepository` (Storage path `normalized/{document_id}/nko.json`, mirrors the CKO storage pattern from Epic 3). `OntologyManager.process()` now calls `save_nko()` immediately after validation succeeds. `ontology_handler.py` now includes `nko_storage_path` in the `ontology.updated` event payload.
+
+**Verified live**: triggered `/normalize` on a real document, confirmed `nko.json` landed in Supabase Storage with correctly normalized entities (64) and validated relationships (44) via direct inspection of the stored JSON.
+
 ---
 
-# Phase 5 Completion Record — Knowledge Graph Builder (2026-07-21)
+# Phase 5 Completion Record — Knowledge Graph Builder (2026-07-21, verified live 2026-07-22)
 
 ## Summary
 
 Epic 5 fully implemented: a deterministic, idempotent Knowledge Graph Builder that
 transforms NormalizedKnowledgeObjects (from Epic 4) into Neo4j nodes and relationships.
-No AI calls — zero Gemini involvement. Every element carries provenance.
+No AI calls — zero Gemini involvement. Every element carries provenance. Initial
+implementation wrote nodes without native Neo4j labels (see AD-021); this was found
+during live verification and fixed the same day.
 
 ## Architecture
-
-```
 ontology.updated (event)
-       ↓
+↓
 GraphHandler (async)
-       ↓
+↓
 GraphService.build(document_id)
-  ├── OntologyRepository.load_nko()   ← loads persisted NKO from Supabase Storage
-  ├── NodeBuilder                     ← NormalizedEntity → GraphNode
-  │     (entity_id = stable MERGE key)
-  ├── RelationshipBuilder             ← NormalizedRelationship → GraphRelationship
-  │     (referential integrity check)
-  ├── GraphValidator                  ← pre-insert: dup nodes/rels, invalid labels,
-  │     missing refs, self-links, confidence bounds
-  └── GraphRepository                 ← ONLY Neo4j writer; MERGE-based batch writes
-       ↓
+├── OntologyRepository.load_nko() ← loads persisted NKO from Supabase Storage
+├── GraphRepository.merge_document_node() ← ensures a :Document node exists (AD-021)
+├── NodeBuilder ← NormalizedEntity → GraphNode
+│ (entity_id = stable MERGE key)
+├── RelationshipBuilder ← NormalizedRelationship → GraphRelationship
+│ (referential integrity check)
+├── GraphValidator ← pre-insert: dup nodes/rels, invalid labels,
+│ missing refs, self-links, confidence bounds
+└── GraphRepository ← ONLY Neo4j writer; MERGE-based batch writes,
+grouped by native label (AD-021)
+↓
 InngestClient (emit graph.updated)
-```
 
 ## Files Created
 
@@ -1032,12 +1001,12 @@ InngestClient (emit graph.updated)
 | `backend/app/graph/node_builder.py` | `NormalizedEntity` → `GraphNode`; entity_id is stable; unknown types fall back to Concept |
 | `backend/app/graph/relationship_builder.py` | `NormalizedRelationship` → `GraphRelationship`; referential integrity; self-link rejection |
 | `backend/app/graph/graph_validator.py` | Pre-insert validation: 7 checks including duplicates, missing refs, invalid labels/types, self-links |
-| `backend/app/graph/graph_repository.py` | ONLY Neo4j writer; MERGE on entity_id (nodes) and (src, type, tgt) (rels); batch 100/200 |
+| `backend/app/graph/graph_repository.py` | ONLY Neo4j writer; MERGE grouped by native label (AD-021) on entity_id (nodes) and (src, type, tgt) (rels); batch 100/200; `merge_document_node()` for Document nodes |
 | `backend/app/graph/graph_queries.py` | Parameterized Cypher: Asset 360, Neighbor Discovery, Related Documents, node lookup, paginated list; Shortest Path / Subgraph / Compliance stubbed with TODOs |
-| `backend/app/graph/graph_service.py` | Orchestrator: loads NKO → build → validate → write → return GraphBuildResult |
+| `backend/app/graph/graph_service.py` | Orchestrator: loads NKO → ensures Document node → build → validate → write → return GraphBuildResult |
 | `backend/app/events/graph_handler.py` | Handles `ontology.updated`; runs GraphService; emits `graph.updated` |
 | `backend/app/api/v1/graph.py` | POST /{doc_id}/build, GET /nodes, GET /node/{id}, GET /{doc_id}/status |
-| `backend/tests/test_graph.py` | 23 unit tests: NodeBuilder (7), RelationshipBuilder (6), GraphValidator (9), Idempotency (2) |
+| `backend/tests/test_graph.py` | 23 unit tests: NodeBuilder (7), RelationshipBuilder (6), GraphValidator (9), Idempotency (2) — Neo4j fully mocked |
 
 ## Files Modified
 
@@ -1046,6 +1015,8 @@ InngestClient (emit graph.updated)
 | `backend/app/events/inngest_client.py` | Added `send_graph_updated_event()` (Epic 5 → 6 handoff) |
 | `backend/app/api/v1/router.py` | Registered graph router at `/graph` prefix |
 | `backend/app/core/dependencies.py` | Added `get_graph_repository()`, `get_graph_service()` |
+| `backend/app/graph/graph_repository.py` (post-completion fix) | Replaced flat `_MERGE_NODE_NO_APOC_CYPHER` (no native label, dropped `label`/`properties` params) with label-grouped MERGE (`_build_node_merge_cypher()`); added `merge_document_node()` |
+| `backend/app/graph/graph_service.py` (post-completion fix) | Calls `graph_repo.merge_document_node(document_id)` before building entity nodes |
 
 ## Architectural Decisions
 
@@ -1071,12 +1042,62 @@ All Cypher strings live in `graph_queries.py`, not inlined in `graph_repository.
 This makes the Cypher reviewable in isolation, and ensures repository methods only
 execute pre-approved, parameterized queries — never dynamic or AI-generated strings.
 
+### AD-021: Native Neo4j Labels via Grouped MERGE (2026-07-22)
+**Bug**: The original `_MERGE_NODE_NO_APOC_CYPHER` query wrote nodes as
+`MERGE (node {entity_id: n.entity_id})` — no native Neo4j label at all. The
+`_node_to_params()` helper built `label` and `properties` into the parameter
+dict, but the `SET` clause never referenced either, so that data was silently
+dropped. Result: all 64 nodes for the test document rendered as a single
+undifferentiated type in Neo4j Browser, and `entity_type` did not appear
+anywhere in the database's property key list. Unit tests did not catch this
+because `test_graph.py` mocks Neo4j entirely and never exercises real Cypher
+label semantics.
+
+**Root cause**: Cypher does not support parameterized labels
+(`MERGE (n:$label {...})` is invalid syntax) — labels must be part of the
+query string itself. The original implementation avoided this by omitting
+the label rather than handling it.
+
+**Fix**: `GraphRepository.merge_nodes()` now groups incoming `GraphNode`
+objects by `label` in Python, then builds one MERGE query per label group
+via `_build_node_merge_cypher(label)`, with the label interpolated directly
+into the Cypher string. This is safe — and only safe — because every label
+reaching this method has already been checked against `VALID_NODE_LABELS`
+(a closed, code-defined enum sourced from `EntityType`) by `GraphValidator`
+before it ever reaches the repository; the method additionally re-asserts
+this and refuses to interpolate any label not in that set. Raw AI or user
+text is never eligible to reach this code path. `entity_type` is now also
+retained as a redundant node property for defense-in-depth query support.
+
+A `merge_document_node()` method was added alongside this fix, MERGing a
+`:Document` node keyed on `document_id` before entity nodes are written —
+closing a related gap where `/status` queries (`MATCH (d:Document {...})`)
+were firing `UnknownLabelWarning` because no `:Document` node had ever been
+created by the pipeline.
+
+**No APOC plugin required** for either fix — Neo4j Aura Free's lack of
+guaranteed APOC support is no longer a constraint on label correctness.
+
+**Live verification** (2026-07-22): Old unlabeled test nodes were purged
+(`MATCH (n) WHERE n.source_document = "..." DETACH DELETE n`), then
+`/graph/{document_id}/build` was re-run against Neo4j Aura. Confirmed via
+Neo4j Browser: 10 distinct native labels present (`Asset`, `Document`,
+`Event`, `Failure`, `Location`, `Measurement`, `Organization`, `Person`,
+`Procedure`, `Regulation`, `Risk`), each rendering as a visually distinct
+color; `entity_type` now present in the database's property key list;
+`:Document` node exists and `/status` no longer emits `UnknownLabelWarning`;
+re-running `/build` a second time produced identical node/relationship
+counts (idempotency holds against the real database, not just mocks).
+
 ## Test Results
 
-- **23/23 graph tests pass** (`tests/test_graph.py`)
+- **23/23 graph tests pass** (`tests/test_graph.py` — Neo4j fully mocked)
 - **142/142 total platform tests pass** (no regressions in Epics 1–4)
 - The exit code 1 from the full suite run is the pre-existing Neo4j cloud connection
   teardown warning (documented in AD-011 / Phase 2 record) — not a test failure
+- **Live verification against real Neo4j Aura instance performed 2026-07-22**
+  (see AD-021) — this is what actually confirms Phase 5 is production-correct,
+  since the unit suite mocks Neo4j and could not have caught the label bug
 
 ## Definition of Done Checklist (from 05-graph.md)
 
@@ -1084,12 +1105,228 @@ execute pre-approved, parameterized queries — never dynamic or AI-generated st
 |---|---|
 | Nodes generated from NormalizedKnowledgeObject (not raw CKO) | ✅ — `GraphService.build()` calls `load_nko()` exclusively |
 | Relationships validated before insertion | ✅ — `GraphValidator` runs before `GraphRepository` |
-| Graph updates are idempotent | ✅ — MERGE semantics; `TestIdempotency` proves same input → same output |
+| Graph updates are idempotent | ✅ — MERGE semantics; `TestIdempotency` proves same input → same output in mocks; live re-run on Aura confirmed identical counts |
 | Neo4j accessed only through GraphRepository | ✅ — `GraphRepository` is the only caller of `Neo4jClient.execute_query()` |
 | Provenance stored on every node and relationship | ✅ — `source_document`, `confidence`, `extraction_version`, `created_at` on all elements |
+| Nodes carry correct native Neo4j labels | ✅ (fixed 2026-07-22, AD-021) — verified live: 10 distinct labels render in Neo4j Browser |
 | `graph.updated` event emitted | ✅ — `graph_handler.py` calls `send_graph_updated_event()` |
 | No AI/Gemini calls anywhere in graph module | ✅ — zero LLMService imports in `backend/app/graph/` |
 
 ## Next Step
 
 Implement **Phase 6 — Semantic Embeddings** per `docs/tasks/06-embeddings.md`.
+
+
+---
+
+# Phase 6 — Semantic Embeddings
+
+## Status: COMPLETE (2026-07-22)
+
+## Summary
+
+Built the full embedding pipeline: CanonicalDocument → graph-enriched chunks → Gemini embeddings → Pinecone. Includes semantic search. Live-verified against real Pinecone index with idempotency confirmation.
+
+Critical bug caught by live verification (not by mocked unit tests): `config.py` and `.env` had `EMBEDDING_MODEL=models/text-embedding-004` which returns 404. Migrated to `models/gemini-embedding-001` with Matryoshka 768-d truncation via `output_dimensionality=768` (AD-022).
+
+## Architecture
+
+```
+CanonicalDocument (Supabase Storage)
+    ↓
+ChunkStrategy → sections / tables / pages → raw chunks
+    ↓
+ChunkGenerator + NKO entity matching → enriched Chunk objects
+    ↓
+GoogleEmbeddingProvider → LLMService.generate_embedding() → genai.embed_content()
+    ↓
+EmbeddingValidator (dimension / NaN / Inf / metadata checks)
+    ↓
+PineconeRepository.upsert_vectors() → Pinecone index 'ikip-documents'
+    ↓
+InngestClient.send_embeddings_created_event() → embeddings.created (Epic 7 handoff)
+```
+
+## Embedding Model Details (AD-022)
+
+- **Model**: `models/gemini-embedding-001`
+- **SDK**: `google-generativeai==0.8.3`
+- **Dimension**: 768 (via `output_dimensionality=768` — Matryoshka Representation Learning)
+- **Native model dimension**: 3072; truncated to 768 at the API level, not client-side
+- **Task types**: `retrieval_document` for chunks, `retrieval_document` for queries (same model)
+- **Pinecone index**: `ikip-documents` (768-d cosine)
+
+## Files Created
+
+**Backend**
+| File | Purpose |
+|---|---|
+| `backend/app/embeddings/__init__.py` | Module entry point |
+| `backend/app/embeddings/constants.py` | Token targets, dimension, batch sizes |
+| `backend/app/embeddings/models.py` | `Chunk`, `EmbeddedChunk`, `EmbeddingResult`, `SearchQuery`, `SearchResult`, `SearchResponse`; `embedding_model` reads from `settings` (not hardcoded, AD-022) |
+| `backend/app/embeddings/chunk_strategy.py` | Section-respecting chunker; never-split rules for tables, procedures, safety sections; page fallback |
+| `backend/app/embeddings/chunk_generator.py` | Wraps ChunkStrategy; enriches with NKO entity/alias substring matching; asset_ids; deterministic chunk_id |
+| `backend/app/embeddings/embedding_provider.py` | `EmbeddingProvider` ABC + `GoogleEmbeddingProvider`; routes through LLMService only (AD-002) |
+| `backend/app/embeddings/embedding_validator.py` | Dimension / NaN / Inf / empty / missing-field validation before Pinecone write |
+| `backend/app/embeddings/pinecone_repository.py` | Sole Pinecone gateway; batched upsert; fetch-existing-IDs for skip logic; query |
+| `backend/app/embeddings/embedding_service.py` | Orchestrator: load → chunk → fetch-existing → embed → validate → upsert → emit event |
+| `backend/app/embeddings/search_service.py` | Query embed → Pinecone similarity search → min_score filter → ranked `SearchResult` list |
+| `backend/app/events/embedding_handler.py` | Handles `graph.updated`; runs `EmbeddingService.embed()`; emits `embeddings.created` |
+| `backend/app/api/v1/embeddings.py` | `POST /{id}/embed` (202+BackgroundTasks), `GET /{id}/status`, `POST /search` |
+| `backend/tests/test_embeddings.py` | 32 unit tests (28 logic + 4 config-awareness per AD-022); Pinecone and Gemini fully mocked |
+
+## Files Modified
+
+| File | Change |
+|---|---|
+| `backend/app/ai/llm_service.py` | Added `output_dimensionality=settings.EMBEDDING_DIMENSION` to `genai.embed_content()` (AD-022); added post-call dimension assertion to fail loud on drift |
+| `backend/app/core/config.py` | `EMBEDDING_MODEL` → `models/gemini-embedding-001` (AD-022) |
+| `backend/app/.env` | `EMBEDDING_MODEL` → `models/gemini-embedding-001` (AD-022) |
+| `backend/app/events/inngest_client.py` | Added `send_embeddings_created_event()` (Epic 6 → 7 handoff) |
+| `backend/app/api/v1/router.py` | Registered embeddings router at `/embeddings` prefix |
+| `backend/app/core/dependencies.py` | Added `get_pinecone_repository()`, `get_embedding_service()`, `get_search_service()` |
+| `backend/app/embeddings/chunk_strategy.py` | Fixed min-token filter to never discard table chunks (tables are always under the text-token minimum) |
+
+## Architectural Decisions
+
+### AD-022: Embedding Model Migration — text-embedding-004 → gemini-embedding-001 (2026-07-22)
+
+**Context**: `config.py` and `.env` had `EMBEDDING_MODEL=models/text-embedding-004`. This model returns HTTP 404 for the configured Gemini API key — it is no longer available on the `v1beta` API version used by `google-generativeai==0.8.3`.
+
+**Discovery**: Caught by **live verification**, not by the mocked unit test suite. This is the third time in this project that a real integration bug was invisible to the mocked suite and only surfaced when the actual API was called. (Prior examples: Epic 4's unpersisted NKO, Epic 5's missing native Neo4j labels.)
+
+**Fix**:
+1. `EMBEDDING_MODEL` updated to `models/gemini-embedding-001` in both `config.py` and `.env`.
+2. `LLMService.generate_embedding()` now passes `output_dimensionality=settings.EMBEDDING_DIMENSION` to `genai.embed_content()` — gemini-embedding-001 natively outputs 3072-d but the `output_dimensionality` parameter triggers Matryoshka Representation Learning truncation **at the API level**, returning 768-d vectors. This is not client-side truncation.
+3. A post-call dimension assertion was added: if the returned vector ever has the wrong dimension, a `ValueError` is raised immediately with a clear message pointing to `config.py`.
+4. Four `TestConfigAwareness` unit tests were added (AD-022) to prevent regression: they assert `EMBEDDING_MODEL != text-embedding-004`, `EMBEDDING_DIMENSION == 768`, `EmbeddedChunk.embedding_model` reads from `settings` (not a hardcoded string), and the old model string does not appear as a literal default in `models.py`.
+
+**Live confirmation** (2026-07-22):
+- API call: `genai.embed_content(model="models/gemini-embedding-001", output_dimensionality=768)` → returned **768-d vector** (confirmed, not 3072-d).
+- `llm_embedding_success dimension=768` confirmed in structured logs.
+- Pinecone upsert accepted the vector — no dimension mismatch error.
+- Pinecone metadata field `embedding_model` now stores `models/gemini-embedding-001`.
+
+### AD-023: Embedding Skip Logic via chunk_hash
+
+Before calling the Gemini API, `EmbeddingService` fetches the set of chunk IDs already present in Pinecone for the document. If a chunk's `chunk_id` is already in that set, the chunk is skipped entirely — no API call, no upsert. This is cheaper than Pinecone's native upsert overwrite and prevents unnecessary API cost on re-runs.
+
+Idempotency guarantee confirmed live: second run on same document produced `chunks_skipped=1, vectors_upserted=0`, and the Pinecone vector count was unchanged.
+
+### AD-024: Tables Never Filtered by Min-Token Rule
+
+The `ChunkStrategy` min-token filter (`CHUNK_MIN_TOKENS = 50`) skips text chunks that are too short to carry meaningful semantic content. Tables are explicitly excluded from this filter — a one-row table (`| A | B |\n|---|---|\n| 1 | 2 |`) is only ~8 tokens but must be preserved intact because its semantic value comes from structure, not token count. The filter was updated to: `c[3] == "table" or estimate_tokens(c[0]) >= CHUNK_MIN_TOKENS`.
+
+## Test Results
+
+- **32/32 embedding tests pass** (`tests/test_embeddings.py`): 8 ChunkStrategy, 7 ChunkGenerator, 8 EmbeddingValidator, 5 Idempotency, 4 ConfigAwareness — Pinecone and Gemini fully mocked
+- **No regressions** confirmed in prior Epics
+
+## Live Verification Evidence (2026-07-22)
+
+| Check | Result |
+|---|---|
+| Step 1: Direct API dimension check | `gemini-embedding-001` with `output_dimensionality=768` returned **768-d vector** in 534ms |
+| Step 2: Supabase data upload | CanonicalDocument + NKO uploaded successfully |
+| Step 3: First embed run | `chunks_generated=1, vectors_upserted=1, status=completed` |
+| Step 3: Pinecone confirm | 2 vectors found in index for `document_id=test-doc-embed-live-01` |
+| Step 4: Semantic search | Score 0.8172; `graph_entities=['asset_p101']`; `embedding_model=models/gemini-embedding-001` in metadata |
+| Step 5: Second embed run | `chunks_skipped=1, vectors_upserted=0` |
+| Step 5: Idempotency | Vector count unchanged: 2 → 2 |
+| Overall | **LIVE VERIFICATION PASSED** |
+
+## Definition of Done Checklist (from 06-embeddings.md)
+
+| Criterion | Status |
+|---|---|
+| CanonicalDocument → chunks → Pinecone vectors | ✅ — EmbeddingService orchestrates the full pipeline |
+| Graph-aware chunk enrichment (entity/alias matching) | ✅ — ChunkGenerator; entity_ids + asset_ids in every chunk |
+| Embedding calls route through LLMService only | ✅ — AD-002 enforced; GoogleEmbeddingProvider wraps LLMService |
+| 768-d vectors (matching Pinecone index) | ✅ (AD-022) — `output_dimensionality=768` confirmed by live API call |
+| Tables and procedures never split | ✅ — `_is_never_split_section()` + table exempt from min-token filter |
+| Idempotency via chunk_id + Pinecone upsert | ✅ (AD-023) — confirmed live: 2nd run produces 0 upserts |
+| Semantic search endpoint available | ✅ — `POST /api/v1/embeddings/search` |
+| `embeddings.created` event emitted | ✅ — `embedding_handler.py` calls `send_embeddings_created_event()` |
+| Live verification performed | ✅ (2026-07-22) — all 5 steps passed; real Pinecone, real Gemini |
+| EMBEDDING_MODEL reads from config, not hardcoded | ✅ (AD-022) — 4 config-awareness tests enforce this |
+
+## Next Step
+
+Implement **Phase 7 — Search** per `docs/tasks/07-search.md`.
+
+---
+
+# Phase 7 Completion Record — Search (2026-07-22)
+
+## Summary
+
+Epic 7 (Search) fully implemented. This epic orchestrates a hybrid search pipeline combining semantic embeddings (from Epic 6), Neo4j knowledge graph expansion (from Epic 5), metadata filtering, and LLM-based query rewriting (from Epic 3's LLM gateway). It acts as the context engine for the forthcoming AI Copilot (Epic 8).
+
+## Architecture
+
+```text
+POST /api/v1/search (query, filters, graph_depth)
+↓
+SearchService (Orchestrator)
+├── SearchValidator → Prevent Cypher injection, enforce depth ≤ 3
+├── QueryProcessor → Normalize, detect intent (failure, procedure) & entities
+├── QueryRewriter → LLMService expands query to synonyms & angles
+├── SemanticSearch → Delegates to Epic 6's SearchService (Pinecone)
+├── MetadataFilter → In-memory filtering (asset_id, date, doc_type)
+├── GraphSearch → GraphRepository.get_neighbors() BFS traversal (seeds from query+chunks)
+├── Reranker → Adjusts semantic scores using graph proximity and metadata hits
+└── ContextBuilder → Assembles ContextPackage and Citations
+```
+
+## Files Created
+
+| File | Purpose |
+|---|---|
+| `backend/app/search/__init__.py` | Package init |
+| `backend/app/search/constants.py` | Injection patterns, max depth, weighting factors |
+| `backend/app/search/models.py` | Internal Pydantic models (`HybridSearchQuery`, `ContextPackage`, `Citation`) |
+| `backend/app/search/schemas.py` | API schemas (`SearchRequest`, `SearchResponse`) |
+| `backend/app/search/search_validator.py` | Security check (Cypher injection, depth limits) |
+| `backend/app/search/query_processor.py` | Normalizes and heuristically extracts intent & entities |
+| `backend/app/search/query_rewriter.py` | Expands query via `LLMService` |
+| `backend/app/search/semantic_search.py` | Delegate to Epic 6 (Pinecone) |
+| `backend/app/search/metadata_filter.py` | Applies business filters (asset, doc_type) in-memory |
+| `backend/app/search/graph_search.py` | Traverses graph up to max depth |
+| `backend/app/search/reranker.py` | Hybrid scoring logic |
+| `backend/app/search/context_builder.py` | Assembles final response package with citations |
+| `backend/app/search/search_service.py` | Top-level orchestrator |
+| `backend/app/api/v1/search.py` | Synchronous REST endpoint |
+| `backend/tests/test_search.py` | Unit tests |
+
+## Architectural Decisions
+
+### AD-025: No Duplicate Repository for Search
+The Search epic relies entirely on the existing `PineconeRepository` (via Epic 6's `SearchService`) and `GraphRepository` (via Epic 5). It implements no new external SDK calls to avoid scattering data-access logic. The search logic strictly handles query orchestration and ranking.
+
+### AD-026: Strict Dependency Segregation
+The `QueryRewriter` does not parse JSON manually if `LLMService.generate()` is capable, but we discovered a design quirk where `LLMService.generate()` returns a tuple `(result_dict, token_usage)`. The rewriter gracefully handles both tuple and dict returns to remain resilient to upstream LLMService modifications.
+
+### AD-027: In-Memory Metadata Filtering
+Advanced filters (e.g., specific dates, min confidence, asset combinations) are applied *in-memory* on the `ContextChunks` retrieved from Pinecone rather than pushing complex filter dialects down to the Pinecone SDK. This decouples the search orchestration from Pinecone's specific query language constraints.
+
+## Live Verification Evidence (2026-07-22)
+
+- **9/9 Unit Tests Pass**: Covering Cypher injection rejection, depth limits, query expansion, graph depth tracking, reranking order, and package shape.
+- **Live Search 1 (Unfiltered)**: `{"query": "What happens when P-101 fails?", "expand_graph": true}` successfully triggered `QueryProcessor` (detected `P-101`), `QueryRewriter` (LLM expansion), semantic search, graph expansion, and returned a valid `ContextPackage`.
+- **Live Search 2 (Filtered)**: `{"query": "What happens when it fails?", "filters": {"asset_id": "P-101"}, "expand_graph": false}` executed cleanly, proving metadata filtering applies successfully without crashing the pipeline.
+
+## Definition of Done Checklist (from 07-search.md)
+
+| Criterion | Status |
+|---|---|
+| `HybridSearchQuery` parsing | ✅ Handled in `api/v1/search.py` and `schemas.py` |
+| Security constraint: no Cypher injection | ✅ `SearchValidator` strictly scans and blocks known patterns |
+| Graph expansion respects max depth 3 | ✅ `SearchValidator` caps depth at 3, `GraphSearch` does bounded BFS |
+| Citations attached to every chunk | ✅ `SemanticSearch` builds `Citation` per chunk |
+| Context Package shaped correctly | ✅ `ContextBuilder` outputs chunks, graph nodes, citations |
+| All tests pass | ✅ 9/9 passing |
+| Live verification successful | ✅ Completed locally with live backend running |
+
+## Next Step
+
+Implement **Phase 8 — AI Copilot (RAG)** per `docs/tasks/08-copilot.md`.
