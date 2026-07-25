@@ -76,6 +76,7 @@ class Chunk(BaseModel):
     chunk_id: str = Field(..., description="Deterministic ID: sha256(doc+section+text_prefix)[:40]")
     chunk_hash: str = Field(..., description="sha256(text) — used for idempotency check")
     document_id: str = Field(..., description="Source document ID")
+    document_name: str = Field(default="", description="Original filename of the document")
     chunk_index: int = Field(..., description="0-indexed position within the document")
 
     # Content

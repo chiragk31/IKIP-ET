@@ -31,6 +31,7 @@ from typing import List, Optional
 import structlog
 
 from app.repositories.storage_repository import StorageRepository
+from app.repositories.document_repository import DocumentRepository
 from app.ontology.ontology_repository import OntologyRepository
 from app.canonical.canonical_models import CanonicalDocument
 from app.embeddings.chunk_generator import ChunkGenerator
@@ -58,6 +59,7 @@ class EmbeddingService:
     def __init__(
         self,
         storage_repo: StorageRepository,
+        document_repo: DocumentRepository,
         ontology_repo: OntologyRepository,
         embedding_provider: EmbeddingProvider,
         pinecone_repo: PineconeRepository,
@@ -72,6 +74,7 @@ class EmbeddingService:
             pinecone_repo: Exclusive Pinecone gateway.
         """
         self._storage = storage_repo
+        self._document_repo = document_repo
         self._ontology_repo = ontology_repo
         self._provider = embedding_provider
         self._pinecone = pinecone_repo
@@ -122,6 +125,22 @@ class EmbeddingService:
                     document_id, start_time,
                     "No chunks generated — document may be empty."
                 )
+
+            # Step 3.5: Populate document name
+            doc_name = "unknown"
+            try:
+                # get_by_id is synchronous — no 'await'
+                doc_meta = self._document_repo.get_by_id(document_id)
+                if doc_meta and doc_meta.original_filename:
+                    doc_name = doc_meta.original_filename
+                    logger.info("document_name_resolved", doc_id=document_id, name=doc_name)
+                else:
+                    logger.warning("document_name_missing_or_null", doc_id=document_id)
+            except Exception as e:
+                logger.error("document_name_lookup_failed", doc_id=document_id, error=str(e))
+
+            for chunk in chunks:
+                chunk.document_name = doc_name
 
             # Step 4: Idempotency check (explicit + logged, not silent)
             all_chunk_ids = [c.chunk_id for c in chunks]

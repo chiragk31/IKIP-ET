@@ -262,6 +262,7 @@ class PineconeRepository:
             "chunk_type": chunk.chunk_type,
             "language": chunk.language,
             "document_type": chunk.document_type,
+            "document_name": chunk.document_name,
             # Citation
             "text": chunk.text[:1000],  # Pinecone metadata has size limits; store preview
             # Graph-aware fields (per Embeddings.md §Graph-Aware Chunks)

@@ -967,10 +967,7 @@ InngestClient (emit ontology.updated, includes nko_storage_path)
 
 Epic 5 fully implemented: a deterministic, idempotent Knowledge Graph Builder that
 transforms NormalizedKnowledgeObjects (from Epic 4) into Neo4j nodes and relationships.
-No AI calls — zero Gemini involvement. Every element carries provenance. Initial
-implementation wrote nodes without native Neo4j labels (see AD-021); this was found
-during live verification and fixed the same day.
-
+No AI calls — zero Gemini involvement. Every element carries provenance. Initial implementation wrote nodes without native Neo4j labels (see AD-021) and relationships without native Neo4j types (see AD-028); both were found during live verification and fixed.
 ## Architecture
 ontology.updated (event)
 ↓
@@ -1109,8 +1106,44 @@ counts (idempotency holds against the real database, not just mocks).
 | Neo4j accessed only through GraphRepository | ✅ — `GraphRepository` is the only caller of `Neo4jClient.execute_query()` |
 | Provenance stored on every node and relationship | ✅ — `source_document`, `confidence`, `extraction_version`, `created_at` on all elements |
 | Nodes carry correct native Neo4j labels | ✅ (fixed 2026-07-22, AD-021) — verified live: 10 distinct labels render in Neo4j Browser |
+| Relationships carry correct native Neo4j types | ✅ (fixed 2026-07-22, AD-028) — verified live: 12 distinct relationship types render in Neo4j Browser, idempotent on re-run |
 | `graph.updated` event emitted | ✅ — `graph_handler.py` calls `send_graph_updated_event()` |
 | No AI/Gemini calls anywhere in graph module | ✅ — zero LLMService imports in `backend/app/graph/` |
+
+
+
+### AD-028: Native Relationship Types via Grouped MERGE (2026-07-22)
+
+**Bug**: `GraphRepository._MERGE_RELATIONSHIP_CYPHER` wrote every relationship as
+`MERGE (src)-[rel:REL {rel_type: r.rel_type, ...}]->(tgt)` — no native Neo4j
+relationship type was ever set. The real type (`CAUSED_BY`, `REQUIRES`, etc.,
+correctly produced by `RelationshipBuilder`) only ever landed as a property
+(`rel.rel_type`), never as the native type. Discovered via visual inspection of
+the Phase 5 Neo4j Browser graph, where every edge rendered identically as `REL`
+regardless of its actual semantic relationship.
+
+**Root cause**: Same constraint as AD-021 — Cypher does not support
+parameterized relationship types (`MERGE (a)-[r:$type]->(b)` is invalid syntax).
+The original implementation avoided this by hardcoding `:REL` rather than
+grouping and interpolating by type, the same shortcut AD-021 fixed for node
+labels but which was never applied to relationships.
+
+**Fix**: `GraphRepository.merge_relationships()` now groups incoming
+`GraphRelationship` objects by `rel_type` in Python, then builds one MERGE
+query per type group via `_build_relationship_merge_cypher(rel_type)` — mirroring
+`_build_node_merge_cypher(label)` from AD-021. Safe only because every `rel_type`
+reaching this method has already been checked against `VALID_RELATIONSHIP_TYPES`
+by `RelationshipBuilder` before it ever reaches the repository.
+
+**Live verification** (2026-07-22): purged old `:REL` edges for the test
+document, re-ran `/graph/{document_id}/build`. Neo4j Browser confirmed 12
+distinct native relationship types (`CAUSED_BY`, `CONNECTED_TO`, `HAS_FAILURE`,
+`HAS_MEASUREMENT`, `INVOLVES`, `LOCATED_IN`, `MITIGATED_BY`, `OWNS`, `PERFORMED`,
+`RECORDED_FOR`, `REQUIRES`, `USES`) totaling 44 relationships, matching
+`relationships_built=44`. Re-ran `/build` a second time (16:01, ~5 min after the
+first): identical result — `nodes_written=64, relationships_written=44,
+rels_skipped=0` both times — confirming MERGE idempotency holds against the
+real Aura instance, not just mocks.
 
 ## Next Step
 
@@ -1315,6 +1348,13 @@ Advanced filters (e.g., specific dates, min confidence, asset combinations) are 
 - **Live Search 1 (Unfiltered)**: `{"query": "What happens when P-101 fails?", "expand_graph": true}` successfully triggered `QueryProcessor` (detected `P-101`), `QueryRewriter` (LLM expansion), semantic search, graph expansion, and returned a valid `ContextPackage`.
 - **Live Search 2 (Filtered)**: `{"query": "What happens when it fails?", "filters": {"asset_id": "P-101"}, "expand_graph": false}` executed cleanly, proving metadata filtering applies successfully without crashing the pipeline.
 
+### Phase 7 Post-Completion Fix
+* **AD-031**: Fixed `citation.confidence` hardcoding in `semantic_search.py`.
+  * **Context**: `ContextBuilder` correctly aggregated reranked chunk scores to citation objects, but `semantic_search.py` had a lingering hardcoded `confidence=1.0` in the provisional `Citation` creation.
+  * **Fix**: Replaced `1.0` with `res.score` (the raw Pinecone similarity score), which `ContextBuilder` later overwrites with the true hybrid score. Added `test_context_builder_citation_confidence_equals_chunk_score` regression test. Live verified citations returned variable confidences (e.g. 0.5983, 0.4328) instead of 1.0.
+
+
+  
 ## Definition of Done Checklist (from 07-search.md)
 
 | Criterion | Status |
@@ -1327,6 +1367,49 @@ Advanced filters (e.g., specific dates, min confidence, asset combinations) are 
 | All tests pass | ✅ 9/9 passing |
 | Live verification successful | ✅ Completed locally with live backend running |
 
+## Phase 8: AI Copilot
+**Status:** ✅ Completed
+
+### Architecture Decisions
+* **AD-032**: LLM Gateway decoupling.
+  * To satisfy the provider-independence requirement, Copilot uses an `LLMGateway` (wrapper around `LLMService`) to inject chat templates and parse LLM-generated JSON strictly. The AI never talks to Pinecone or Supabase directly.
+* **AD-033**: Follow-up Reference Resolution without LLM.
+  * To reduce latency (chat is already ~16s), follow-up question references ("When was it last inspected?") are resolved deterministically using a regex heuristic that replaces pronouns with the `active_asset` and `active_topic` maintained in the session's memory state.
+* **AD-034**: Copilot Default Search Parameters.
+  * Graph expansion is disabled (`expand_graph=False`) by default in chat to optimize for latency unless the client explicitly opts in.
+  * The top K defaults to 5 (instead of 10) to reduce token consumption and latency in the prompt.
+* **AD-035**: Hallucination Prevention Validator.
+  * `ResponseValidator` intercepts LLM responses. If the search returned no context, or the LLM failed to cite `chunk_id`s, or the LLM confidence is below `0.10`, the response is overridden with a strict NO_EVIDENCE fallback.
+* **AD-036**: LLM citation schema mapping.
+  * The LLM prompt `chat.md` demands a `citations` array with `chunk_id` and `excerpt`. `CitationBuilder` takes those chunk IDs and maps them to the actual, trusted `ContextChunk` citations built by the Search module to avoid hallucinated page numbers or document names.
+
+### Live Verification Findings
+1. Query "What caused Pump P-101's failure?" returned a grounded answer in ~16.8 seconds with 3 accurate citations and a hybrid confidence of 0.4328.
+2. Follow-up "When was it last inspected?" (session memory test) correctly resolved to "When was P-101 last inspected?", hit the cache/memory, and returned the answer in ~8.3 seconds.
+3. Out-of-domain query "Tell me about black holes." resulted in an empty citation array, triggering the `ResponseValidator` NO_EVIDENCE_RESPONSE fallback successfully.
+
+## Known Gaps (Phase 8)
+
+- **Streaming not implemented.** Copilot.md requires it explicitly; current /chat
+  is fully synchronous. Given measured latency (8-25s per turn depending on
+  graph expansion), this is a real UX gap for interactive chat, not cosmetic.
+  Revisit before any user-facing demo that isn't tolerant of long waits.
+
+- **Graph expansion in chat — tested and confirmed working (2026-07-22).**
+  Query: "What other assets are connected to Pump P-101 and its failure?"
+  with expand_graph=true. graph_nodes_discovered=39 (matches Phase 7 baseline).
+  Confirmed the graph context actually reaches the LLM, not just fetched and
+  unused: response correctly surfaced Pump P-102 and Feedwater Header in
+  related_assets — neither appears in the top-5 semantic citations, so this
+  could only have come from graph traversal.
+  Cost of enabling it: total latency rose to 25.3s (search_diagnostics alone:
+  17.9s, nearly double the ~6-8s non-graph baseline). expand_graph=false
+  remains the correct default (AD-034); graph expansion should be treated as
+  an explicit opt-in for questions that need relationship context, not a
+  default-on feature, until the latency issue above is addressed.
+
+
+
 ## Next Step
 
-Implement **Phase 8 — AI Copilot (RAG)** per `docs/tasks/08-copilot.md`.
+Implement **Phase 9 — Assets** per `docs/tasks/08-assets.md`.

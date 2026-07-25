@@ -89,7 +89,7 @@ class SemanticSearch:
                 page_number=res.page_number,
                 chunk_id=res.chunk_id,
                 asset_ids=res.metadata.get("asset_ids", []),
-                confidence=1.0,  # semantic matches are raw facts
+                confidence=res.score,  # provisional semantic score; ContextBuilder overwrites with reranked hybrid score
                 source_type="semantic",
             )
 

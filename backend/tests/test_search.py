@@ -39,9 +39,8 @@ from app.search.search_service import SearchService
 
 class MockLLMService:
     async def generate(self, *args, **kwargs):
-        class MockResponse:
-            raw_response = '{"original_question": "test", "search_queries": ["expanded test"]}'
-        return MockResponse()
+        # LLMService.generate() returns (result_dict, TokenUsage) — mock both
+        return ({"original_question": "test", "search_queries": ["expanded test"]}, None)
 
 
 class MockEpic6SearchService:
@@ -228,3 +227,52 @@ async def test_full_search_service_context_package_shape():
     assert "P-101" in pkg.processed_query.detected_entities
     assert pkg.chunks[0].chunk_id == "chunk-1"
     assert pkg.citations[0].document_id == "doc-1"
+
+
+def test_context_builder_citation_confidence_equals_chunk_score():
+    """
+    Regression test for the citation.confidence hardcoding bug.
+
+    After ContextBuilder.build():
+      - Each citation.confidence must equal the corresponding chunk.score (not a constant).
+      - When multiple chunks have different scores, confidence values must vary.
+    """
+    from app.search.context_builder import ContextBuilder
+    from app.search.models import ContextChunk, Citation, ProcessedQuery
+
+    builder = ContextBuilder()
+
+    citation_a = Citation(document_id="doc-1", chunk_id="chunk-a", confidence=0.0)
+    citation_b = Citation(document_id="doc-2", chunk_id="chunk-b", confidence=0.0)
+
+    chunk_a = ContextChunk(
+        chunk_id="chunk-a", document_id="doc-1", text="text a",
+        score=0.812, citation=citation_a
+    )
+    chunk_b = ContextChunk(
+        chunk_id="chunk-b", document_id="doc-2", text="text b",
+        score=0.654, citation=citation_b
+    )
+
+    processed = ProcessedQuery(
+        original_query="test", normalized_query="test", expanded_query="test"
+    )
+
+    package = builder.build(
+        query="test",
+        processed_query=processed,
+        chunks=[chunk_a, chunk_b],
+        graph_nodes=[],
+    )
+
+    # Confidence must NOT be a constant 1.0
+    confidences = {c.confidence for c in package.citations}
+    assert 1.0 not in confidences, "citation.confidence must not be hardcoded 1.0"
+
+    # Each citation.confidence must match its chunk.score exactly
+    citation_map = {c.chunk_id: c.confidence for c in package.citations}
+    assert citation_map["chunk-a"] == pytest.approx(0.812)
+    assert citation_map["chunk-b"] == pytest.approx(0.654)
+
+    # Scores must vary — not all identical
+    assert len(confidences) > 1, "All citations have identical confidence — scoring is broken"

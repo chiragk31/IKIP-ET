@@ -385,6 +385,7 @@ def get_pinecone_repository() -> PineconeRepository:
 
 def get_embedding_service(
     storage_repo: StorageRepository = Depends(get_storage_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
     ontology_repo: OntologyRepository = Depends(get_ontology_repository),
     llm_service: LLMService = Depends(get_llm_service),
     pinecone_repo: PineconeRepository = Depends(get_pinecone_repository),
@@ -396,6 +397,7 @@ def get_embedding_service(
 
     Args:
         storage_repo: For loading the CanonicalDocument from Supabase Storage.
+        document_repo: For fetching document metadata (like original_filename).
         ontology_repo: For loading the NKO from Supabase Storage.
         llm_service: For generating embeddings (routed through GoogleEmbeddingProvider).
         pinecone_repo: For upserted embedded chunks to Pinecone.
@@ -406,6 +408,7 @@ def get_embedding_service(
     embedding_provider = GoogleEmbeddingProvider(llm_service=llm_service)
     return EmbeddingService(
         storage_repo=storage_repo,
+        document_repo=document_repo,
         ontology_repo=ontology_repo,
         embedding_provider=embedding_provider,
         pinecone_repo=pinecone_repo,
@@ -460,4 +463,51 @@ def get_hybrid_search_service(
         graph_search=graph_search,
         context_builder=context_builder,
         reranker=reranker,
+    )
+
+
+# -----------------------------------------------
+# Copilot Service (Epic 8)
+# -----------------------------------------------
+
+from app.copilot.memory_manager import MemoryManager
+from app.copilot.conversation_manager import ConversationManager
+from app.copilot.followup_handler import FollowupHandler
+from app.copilot.llm_gateway import LLMGateway
+from app.copilot.response_generator import ResponseGenerator
+from app.copilot.response_validator import ResponseValidator
+from app.copilot.citation_builder import CitationBuilder
+from app.copilot.copilot_service import CopilotService
+
+# Singleton MemoryManager so sessions persist across requests
+_memory_manager = MemoryManager()
+
+
+def get_memory_manager() -> MemoryManager:
+    """Inject singleton MemoryManager."""
+    return _memory_manager
+
+
+def get_copilot_service(
+    hybrid_search: HybridSearchService = Depends(get_hybrid_search_service),
+    memory_manager: MemoryManager = Depends(get_memory_manager),
+    llm_service: LLMService = Depends(get_llm_service),
+) -> CopilotService:
+    """
+    Inject CopilotService (Epic 8).
+    """
+    conv_manager = ConversationManager(memory=memory_manager)
+    followup_handler = FollowupHandler()
+    llm_gateway = LLMGateway(llm_service=llm_service)
+    response_generator = ResponseGenerator(llm_gateway=llm_gateway, conv_manager=conv_manager)
+    response_validator = ResponseValidator()
+    citation_builder = CitationBuilder()
+
+    return CopilotService(
+        hybrid_search=hybrid_search,
+        conv_manager=conv_manager,
+        followup_handler=followup_handler,
+        response_generator=response_generator,
+        response_validator=response_validator,
+        citation_builder=citation_builder,
     )

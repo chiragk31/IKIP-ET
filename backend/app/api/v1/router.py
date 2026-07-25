@@ -23,13 +23,13 @@ api_router.include_router(embeddings.router, prefix="/embeddings", tags=["Embedd
 
 # Future routes registered as each Epic is completed:
 # from app.api.v1 import auth, assets, chat
-from app.api.v1 import search
+from app.api.v1 import search, chat
 # from app.api.v1 import compliance, maintenance, dashboard, users, admin
 #
 # api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 # api_router.include_router(assets.router, prefix="/assets", tags=["Assets"])
 api_router.include_router(search.router, prefix="/search", tags=["Search"])
-# api_router.include_router(chat.router, prefix="/chat", tags=["AI Copilot"])
+api_router.include_router(chat.router, prefix="/chat", tags=["AI Copilot"])
 # api_router.include_router(compliance.router, prefix="/compliance", tags=["Compliance"])
 # api_router.include_router(maintenance.router, prefix="/maintenance", tags=["Maintenance"])
 # api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])

@@ -40,6 +40,7 @@ from app.graph.constants import (
     NODE_BATCH_SIZE,
     RELATIONSHIP_BATCH_SIZE,
     VALID_NODE_LABELS,
+    VALID_RELATIONSHIP_TYPES,
     GRAPH_PIPELINE_VERSION,
 )
 from app.graph import graph_queries as Q
@@ -47,20 +48,23 @@ from app.graph import graph_queries as Q
 logger = structlog.get_logger(__name__)
 
 # -------------------------------------------------------------------
-# Cypher templates (parameterized — never string-formatted, EXCEPT the
-# label token below, which is only ever drawn from VALID_NODE_LABELS)
+# Relationship MERGE template — rel_type is interpolated into the
+# Cypher string because Neo4j does not support parameterized
+# relationship types. Safe ONLY because rel_type is always drawn
+# from VALID_RELATIONSHIP_TYPES (a closed, code-defined enum) before
+# this template is ever formatted — never raw AI/user text.
 # -------------------------------------------------------------------
 
-_MERGE_RELATIONSHIP_CYPHER = """
+_MERGE_RELATIONSHIP_TEMPLATE = """
 UNWIND $rels AS r
-MATCH (src {entity_id: r.source_id})
-MATCH (tgt {entity_id: r.target_id})
-MERGE (src)-[rel:REL {rel_type: r.rel_type, source_id: r.source_id, target_id: r.target_id}]->(tgt)
+MATCH (src {{entity_id: r.source_id}})
+MATCH (tgt {{entity_id: r.target_id}})
+MERGE (src)-[rel:{rel_type}]->(tgt)
 ON CREATE SET
-    rel.confidence        = r.confidence,
-    rel.source_document   = r.source_document,
-    rel.extraction_version = r.extraction_version,
-    rel.created_at        = r.created_at
+    rel.confidence          = r.confidence,
+    rel.source_document     = r.source_document,
+    rel.extraction_version  = r.extraction_version,
+    rel.created_at          = r.created_at
 ON MATCH SET
     rel.confidence = CASE
         WHEN r.confidence > rel.confidence THEN r.confidence
@@ -199,7 +203,13 @@ class GraphRepository:
         """
         Batch-MERGE a list of GraphRelationship objects into Neo4j.
 
-        MERGE key: (source_id, rel_type, target_id) — idempotent.
+        Relationships are grouped by rel_type (native Neo4j relationship
+        type, e.g. :CAUSED_BY, :REQUIRES) since relationship types cannot
+        be passed as query parameters — the same constraint and pattern
+        as node label handling (see _build_node_merge_cypher / AD-021).
+
+        MERGE key: (source_id, rel_type, target_id) via the native type
+        plus matched src/tgt entity_ids — idempotent.
 
         Args:
             relationships: Validated GraphRelationship objects to persist.
@@ -210,27 +220,46 @@ class GraphRepository:
         if not relationships:
             return 0
 
+        grouped: Dict[str, List[GraphRelationship]] = defaultdict(list)
+        for r in relationships:
+            grouped[r.rel_type].append(r)
+
         total_merged = 0
-        for batch in self._batch(relationships, RELATIONSHIP_BATCH_SIZE):
-            params = {"rels": [self._rel_to_params(r) for r in batch]}
-            try:
-                results = self._neo4j.execute_query(
-                    _MERGE_RELATIONSHIP_CYPHER, params
-                )
-                merged = results[0].get("merged", 0) if results else len(batch)
-                total_merged += merged
-                logger.debug(
-                    "rel_batch_merged",
-                    batch_size=len(batch),
-                    merged=merged,
-                )
-            except Exception as e:
+        for rel_type, rel_group in grouped.items():
+            if rel_type not in VALID_RELATIONSHIP_TYPES:
+                # Should never happen — RelationshipBuilder/GraphValidator
+                # reject unknown types before this point — but never
+                # interpolate an unvalidated string into Cypher, so
+                # hard-stop instead.
                 logger.error(
-                    "rel_batch_merge_failed",
-                    batch_size=len(batch),
-                    error=str(e),
+                    "rel_merge_rejected_invalid_type",
+                    rel_type=rel_type,
+                    count=len(rel_group),
                 )
-                raise
+                continue
+
+            cypher = self._build_relationship_merge_cypher(rel_type)
+
+            for batch in self._batch(rel_group, RELATIONSHIP_BATCH_SIZE):
+                params = {"rels": [self._rel_to_params(r) for r in batch]}
+                try:
+                    results = self._neo4j.execute_query(cypher, params)
+                    merged = results[0].get("merged", 0) if results else len(batch)
+                    total_merged += merged
+                    logger.debug(
+                        "rel_batch_merged",
+                        rel_type=rel_type,
+                        batch_size=len(batch),
+                        merged=merged,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "rel_batch_merge_failed",
+                        rel_type=rel_type,
+                        batch_size=len(batch),
+                        error=str(e),
+                    )
+                    raise
 
         logger.info(
             "relationships_merged_total",
@@ -379,6 +408,19 @@ ON MATCH SET
     END
 RETURN count(node) AS merged
 """
+
+    @staticmethod
+    def _build_relationship_merge_cypher(rel_type: str) -> str:
+        """
+        Build a MERGE query for a single, pre-validated relationship type.
+
+        `rel_type` MUST already be checked against VALID_RELATIONSHIP_TYPES
+        by the caller before this is invoked — it is interpolated directly
+        into the Cypher string because Neo4j does not support parameterized
+        relationship types. This is safe only because the value space is a
+        closed, code-defined enum, never raw AI or user text.
+        """
+        return _MERGE_RELATIONSHIP_TEMPLATE.format(rel_type=rel_type)
 
     @staticmethod
     def _batch(items: list, size: int):

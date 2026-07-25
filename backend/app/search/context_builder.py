@@ -58,6 +58,7 @@ class ContextBuilder:
         citations: List[Citation] = []
         for c in final_chunks:
             if c.citation:
+                c.citation.confidence = c.score
                 citations.append(c.citation)
 
         package = ContextPackage(
