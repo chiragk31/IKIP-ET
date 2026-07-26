@@ -1412,4 +1412,37 @@ Advanced filters (e.g., specific dates, min confidence, asset combinations) are 
 
 ## Next Step
 
-Implement **Phase 9 — Assets** per `docs/tasks/08-assets.md`.
+Implement **Phase 9 — Assets** per `docs/tasks/09-assets.md`.
+
+---
+
+# Phase 9 Completion Record — Asset Intelligence (2026-07-25)
+
+## Summary
+
+Epic 9 (Asset Intelligence) fully implemented. This epic creates a pure aggregation layer that consumes graph data (Epic 5) and semantic search data (Epic 7) to build a unified Asset 360 profile. It provides a read-only, fully provenanced snapshot of an asset's identity, history, relationships, health, and supporting documentation.
+
+## Architecture Decisions
+
+- **AD-037**: Asset search via `list_nodes` with Python-layer filtering. To strictly respect the "no new Cypher" constraint, `GET /assets` fetches nodes via the existing `GraphRepository.list_nodes` and applies label and metadata filters in-memory.
+- **AD-038**: Simple in-memory TTL cache (dict + timestamp). Cache key = `entity_id`, TTL = 300s. Evicts entries dynamically to prevent memory leaks while keeping repeated profile hits fast without introducing Redis.
+- **AD-039**: Timeline and Health classification driven entirely by existing graph relationships (`HAS_FAILURE`, `PERFORMED`, `INVOLVES`) and node labels (`Failure`, `Measurement`). No new queries were introduced; all intelligence is extracted from `GraphRepository.get_neighbors()`.
+
+## Live Verification Findings
+- `GET /api/v1/assets/asset_p101` returns a complete Asset 360 profile, mapping 15 timeline events, 29 relationships, and 7 related semantic chunks.
+- Graph relationships were successfully translated into logical classifications (e.g., `HAS_FAILURE` -> `has_failure`).
+- Health summary provided descriptive-only aggregations (e.g., `maintenance_frequency="high"`, `failure_severity="moderate"`).
+- `GET /api/v1/assets/nonexistent` correctly returned a structured 404 error rather than a silent empty 200, resolving the same class of issue seen in Epic 5.
+- `GET /api/v1/assets?limit=2` successfully returned paginated, filtered results.
+
+## Definition of Done Checklist
+- [x] Pure aggregation layer (no new Cypher/Pinecone queries)
+- [x] Implements the Asset Builder Pattern
+- [x] Supports Asset 360 profile and asset list search endpoints
+- [x] Identifiers strictly use the stable `entity_id` scheme
+- [x] Provenance (source document, confidence) attached to every response field
+- [x] Live verification performed against real backend
+
+## Next Step
+
+Proceed to Epic 10.

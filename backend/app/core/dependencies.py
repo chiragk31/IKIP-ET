@@ -39,6 +39,10 @@ from app.search.graph_search import GraphSearch
 from app.search.context_builder import ContextBuilder
 from app.search.reranker import Reranker
 from app.search.search_service import SearchService as HybridSearchService
+from app.assets.asset_repository import AssetRepository
+from app.assets.asset_builder import AssetBuilder
+from app.assets.asset_validator import AssetValidator
+from app.assets.asset_service import AssetService
 
 
 # -----------------------------------------------
@@ -322,7 +326,7 @@ def get_ontology_manager(
 # -----------------------------------------------
 # Graph Builder (Epic 5)
 # -----------------------------------------------
-
+@lru_cache()
 def get_graph_repository(
     neo4j: Neo4jClient = Depends(get_neo4j_client),
 ) -> GraphRepository:
@@ -365,7 +369,7 @@ def get_graph_service(
 # -----------------------------------------------
 # Pinecone Repository (Epic 6)
 # -----------------------------------------------
-
+@lru_cache()
 def get_pinecone_repository() -> PineconeRepository:
     """
     Inject PineconeRepository.
@@ -418,7 +422,7 @@ def get_embedding_service(
 # -----------------------------------------------
 # Search Service (Epic 6)
 # -----------------------------------------------
-
+@lru_cache()
 def get_search_service(
     llm_service: LLMService = Depends(get_llm_service),
     pinecone_repo: PineconeRepository = Depends(get_pinecone_repository),
@@ -436,7 +440,7 @@ def get_search_service(
 # -----------------------------------------------
 # Hybrid Search Service (Epic 7)
 # -----------------------------------------------
-
+@lru_cache()
 def get_hybrid_search_service(
     llm_service: LLMService = Depends(get_llm_service),
     epic6_search_service: Epic6SearchService = Depends(get_search_service),
@@ -463,6 +467,57 @@ def get_hybrid_search_service(
         graph_search=graph_search,
         context_builder=context_builder,
         reranker=reranker,
+    )
+
+
+# -----------------------------------------------
+# Asset Intelligence (Epic 9)
+# -----------------------------------------------
+@lru_cache()
+def get_asset_repository(
+    graph_repo: GraphRepository = Depends(get_graph_repository),
+    hybrid_search: HybridSearchService = Depends(get_hybrid_search_service),
+) -> AssetRepository:
+    """
+    Inject AssetRepository.
+
+    Coordinates GraphRepository (graph reads) and HybridSearchService
+    (document retrieval) — the two data sources for Asset Intelligence.
+    Does NOT call Neo4j or Pinecone directly.
+
+    Args:
+        graph_repo: The ONLY Neo4j read/write gateway.
+        hybrid_search: The Epic 7 hybrid search orchestrator.
+
+    Returns:
+        AssetRepository instance.
+    """
+    return AssetRepository(
+        graph_repo=graph_repo,
+        search_svc=hybrid_search,
+    )
+
+@lru_cache()
+def get_asset_service(
+    asset_repo: AssetRepository = Depends(get_asset_repository),
+) -> AssetService:
+    """
+    Inject AssetService.
+
+    Top-level Asset Intelligence orchestrator.
+    Builds a new AssetBuilder and AssetValidator on each request
+    (both are stateless).
+
+    Args:
+        asset_repo: Injected AssetRepository.
+
+    Returns:
+        AssetService instance.
+    """
+    return AssetService(
+        repository=asset_repo,
+        builder=AssetBuilder(),
+        validator=AssetValidator(),
     )
 
 
