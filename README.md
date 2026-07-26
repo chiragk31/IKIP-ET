@@ -137,15 +137,15 @@ IndustrialKnowledgeIntelligence/
 ## Development Roadmap
 
 - [x] Phase 0 — Project Foundation
-- [ ] Phase 1 — Document Upload
-- [ ] Phase 2 — Document Processing Pipeline
-- [ ] Phase 3 — AI Knowledge Extraction
-- [ ] Phase 4 — Ontology Management
-- [ ] Phase 5 — Knowledge Graph
-- [ ] Phase 6 — Embeddings & Semantic Search
-- [ ] Phase 7 — AI Copilot (RAG)
-- [ ] Phase 8 — Asset Intelligence
-- [ ] Phase 9 — Dashboard
+- [X] Phase 1 — Document Upload
+- [X] Phase 2 — Document Processing Pipeline
+- [X] Phase 3 — AI Knowledge Extraction
+- [X] Phase 4 — Ontology Management
+- [X] Phase 5 — Knowledge Graph
+- [X] Phase 6 — Embeddings & Semantic Search
+- [X] Phase 7 — AI Copilot (RAG)
+- [X] Phase 8 — Asset Intelligence
+- [X] Phase 9 — Dashboard
 - [ ] Phase 10 — Authentication
 - [ ] Phase 11 — Deployment & Demo
 

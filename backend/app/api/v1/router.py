@@ -21,18 +21,17 @@ api_router.include_router(graph.router, prefix="/graph", tags=["Knowledge Graph"
 # Semantic Embeddings & Search (Phase 6 — Embeddings)
 api_router.include_router(embeddings.router, prefix="/embeddings", tags=["Embeddings & Search"])
 
-# Future routes registered as each Epic is completed:
-# from app.api.v1 import auth, assets, chat
-from app.api.v1 import search, chat, assets
-# from app.api.v1 import compliance, maintenance, dashboard, users, admin
-#
-# api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-# api_router.include_router(assets.router, prefix="/assets", tags=["Assets"])
+from app.api.v1 import search, chat, assets, dashboard
+
 api_router.include_router(search.router, prefix="/search", tags=["Search"])
 api_router.include_router(chat.router, prefix="/chat", tags=["AI Copilot"])
 api_router.include_router(assets.router, prefix="/assets", tags=["Asset Intelligence"])
+
+# Dashboard (Phase 10 — Dashboard Frontend)
+api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+
+# api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 # api_router.include_router(compliance.router, prefix="/compliance", tags=["Compliance"])
 # api_router.include_router(maintenance.router, prefix="/maintenance", tags=["Maintenance"])
-# api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 # api_router.include_router(users.router, prefix="/users", tags=["Users"])
 # api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])

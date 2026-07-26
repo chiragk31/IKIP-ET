@@ -164,6 +164,15 @@ class AssetRepository:
     # Asset list (for GET /assets)
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Asset list (for GET /assets)
+    # ------------------------------------------------------------------
+
+    # Cap on how many raw graph nodes we'll ever scan to compute an
+    # accurate Asset total. Decoupled from the caller's `limit` — see
+    # the bug this fixes, below.
+    _MAX_SCAN_NODES: int = 1000
+
     async def list_assets(
         self,
         page: int = 1,
@@ -175,6 +184,27 @@ class AssetRepository:
         Uses GraphRepository.list_nodes() then filters to :Asset label
         in Python — no new Cypher required (AD-037).
 
+        BUG FIX (2026-07-26): The original implementation over-fetched
+        `limit * 5` raw nodes before filtering to :Asset label, then used
+        `len(asset_items)` from THAT SAME over-fetched slice as the
+        reported `total`. When called with a small `limit` (e.g.
+        `/dashboard/overview` calls this with limit=1 just to read the
+        total count cheaply), the over-fetch window could be as small as
+        5 raw nodes — and if none of those first 5 nodes (ordered by
+        created_at DESC) happened to carry the Asset label, `total` was
+        reported as 0 even when real assets existed elsewhere in the
+        graph. Live-verified: `/dashboard/assets` (limit=20) correctly
+        returned `total=12`, while `/dashboard/overview` (limit=1) on the
+        same backend state returned `total=0` for the identical asset set.
+
+        Fix: the scan window used to compute an accurate total is now a
+        fixed, generous cap (`_MAX_SCAN_NODES`), completely decoupled
+        from the caller's requested `limit`. This is still an in-memory
+        Python filter over a bounded fetch (no new Cypher, per AD-037),
+        but it no longer lets a small `limit` silently starve the total
+        count. Only the requested page slice depends on `limit`; the
+        total does not.
+
         Args:
             page: 1-indexed page number.
             limit: Items per page.
@@ -184,18 +214,15 @@ class AssetRepository:
         """
         logger.info("asset_repository_list_start", page=page, limit=limit)
 
-        # Over-fetch to filter; list_nodes supports pagination but doesn't
-        # support label filter — we fetch a wider page and filter in Python.
-        # For a real production system this would be a targeted query; here
-        # we stay within the "no new Cypher in assets/" constraint (AD-037).
+        # Scan a fixed, generous window to compute an accurate total,
+        # independent of the caller's requested page size.
         raw_result = await asyncio.to_thread(
             self._graph.list_nodes,
-            page=page,
-            limit=limit * 5,  # over-fetch to account for non-asset nodes
+            page=1,
+            limit=self._MAX_SCAN_NODES,
         )
 
         all_items: List[Dict[str, Any]] = raw_result.get("items", [])
-        total_all: int = raw_result.get("total", 0)
 
         # Filter to Asset label only
         asset_items = [
@@ -203,11 +230,13 @@ class AssetRepository:
             if item.get("label") == ASSET_NODE_LABEL
         ]
 
-        # Re-paginate the filtered results
+        asset_total = len(asset_items)
+
+        # Re-paginate the filtered results according to the caller's
+        # actual requested page/limit
         start = (page - 1) * limit
         end = start + limit
         paginated = asset_items[start:end]
-        asset_total = len(asset_items)
 
         logger.info(
             "asset_repository_list_complete",
