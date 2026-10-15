@@ -55,7 +55,7 @@ from app.utils.constants import DocumentStatus, ProcessingStage
 logger = structlog.get_logger(__name__)
 
 # Processed canonical JSON is stored at this path pattern in Supabase Storage
-CANONICAL_STORAGE_PATH = "processed/{document_id}/canonical.json"
+# CANONICAL_STORAGE_PATH = "processed/{document_id}/canonical.json"
 CANONICAL_BUCKET = "documents"
 
 # Pipeline version — increment when pipeline logic changes
@@ -458,34 +458,82 @@ class ProcessingService:
             logger.warning("ocr_failed_non_fatal", error=str(e))
             return []
 
-    def _store_canonical(self, document_id: str, canonical: CanonicalDocument) -> str:
-        """
-        Serialize canonical document to JSON and store in Supabase Storage.
+    # def _store_canonical(self, document_id: str, canonical: CanonicalDocument) -> str:
+    #     """
+    #     Serialize canonical document to JSON and store in Supabase Storage.
 
-        The processed output is stored SEPARATELY from the original upload.
-        Path: processed/{document_id}/canonical.json
+    #     The processed output is stored SEPARATELY from the original upload.
+    #     Path: processed/{document_id}/canonical.json
 
-        Returns:
-            Storage path of the stored canonical JSON
-        """
-        canonical_path = CANONICAL_STORAGE_PATH.format(document_id=document_id)
+    #     Returns:
+    #         Storage path of the stored canonical JSON
+    #     """
+    #     canonical_path = CANONICAL_STORAGE_PATH.format(document_id=document_id)
 
+    #     try:
+    #         canonical_json = json.dumps(canonical.to_dict(), ensure_ascii=False, indent=2)
+    #         json_bytes = canonical_json.encode("utf-8")
+
+    #         self._storage_repo.upload_file(
+    #             file_content=json_bytes,
+    #             original_filename=f"canonical_{document_id}.json",
+    #             mime_type="application/json",
+    #         )
+
+    #         logger.info(
+    #             "canonical_stored",
+    #             document_id=document_id,
+    #             path=canonical_path,
+    #             size_bytes=len(json_bytes),
+    #         )
+    #         return canonical_path
+
+    #     except Exception as e:
+    #         logger.error(
+    #             "canonical_storage_failed",
+    #             document_id=document_id,
+    #             error=str(e),
+    #         )
+    #         # Non-fatal: return empty path, downstream can reprocess
+    #         return ""
+    
+   
+    def _store_canonical(
+        self,
+        document_id: str,
+        canonical: CanonicalDocument,
+    ) -> str:
+        """Store the canonical document and return its actual storage path."""
         try:
-            canonical_json = json.dumps(canonical.to_dict(), ensure_ascii=False, indent=2)
+            canonical_json = json.dumps(
+                canonical.to_dict(),
+                ensure_ascii=False,
+                indent=2,
+            )
             json_bytes = canonical_json.encode("utf-8")
 
-            self._storage_repo.upload_file(
+            result = self._storage_repo.upload_file(
                 file_content=json_bytes,
                 original_filename=f"canonical_{document_id}.json",
                 mime_type="application/json",
             )
 
+            # StorageRepository returns a dictionary, not a string.
+            if not isinstance(result, dict) or not result.get("storage_path"):
+                raise RuntimeError(
+                    f"Storage upload did not return a valid path: {result!r}"
+                )
+
+            canonical_path = result["storage_path"]
+
             logger.info(
                 "canonical_stored",
                 document_id=document_id,
                 path=canonical_path,
+                bucket=result.get("bucket"),
                 size_bytes=len(json_bytes),
             )
+
             return canonical_path
 
         except Exception as e:
@@ -494,8 +542,8 @@ class ProcessingService:
                 document_id=document_id,
                 error=str(e),
             )
-            # Non-fatal: return empty path, downstream can reprocess
-            return ""
+            raise
+
 
     def _update_status(
         self,
@@ -547,3 +595,6 @@ class ProcessingService:
             for row in rows[:100]  # Limit to 100 rows to avoid huge strings
         ]
         return "\n".join([header_row, sep] + data_rows)
+
+
+

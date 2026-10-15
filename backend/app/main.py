@@ -14,7 +14,7 @@ import structlog
 from app.core.config import settings
 from app.core.logger import configure_logging
 from app.api.v1.router import api_router
-
+from app.events.inngest_functions import register_inngest
 
 # Configure structured logging on startup
 configure_logging()
@@ -70,6 +70,7 @@ def create_application() -> FastAPI:
 
     # Register API Router
     application.include_router(api_router, prefix=settings.API_V1_PREFIX)
+    register_inngest(application)
 
     return application
 
