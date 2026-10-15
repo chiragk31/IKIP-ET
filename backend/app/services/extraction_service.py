@@ -185,11 +185,15 @@ class ExtractionService:
 
             # Accumulate token usage across all stages
             accumulated_tokens = TokenUsage.zero()
+            # Track how many stages failed by exception (vs. empty-but-ok results)
+            failed_stages: list[str] = []
 
             # --- Stage 1: Entity Extraction ---
             entities_result, entity_latency, entity_tokens = await self._run_stage_entities(
                 document_id, document_text, stage_index=1
             )
+            if entity_tokens.total_tokens == 0:
+                failed_stages.append("entity_extraction")
             accumulated_tokens = accumulated_tokens + entity_tokens
 
             # --- Build entity registry immediately after Stage 1 ---
@@ -200,37 +204,67 @@ class ExtractionService:
             relationships_result, rel_latency, rel_tokens = await self._run_stage_relationships(
                 document_id, document_text, entities_result, stage_index=2
             )
+            if rel_tokens.total_tokens == 0:
+                failed_stages.append("relationship_extraction")
             accumulated_tokens = accumulated_tokens + rel_tokens
 
             # --- Stage 3: Measurement Extraction ---
             measurements_result, meas_latency, meas_tokens = await self._run_stage_measurements(
                 document_id, document_text, entity_registry, stage_index=3
             )
+            if meas_tokens.total_tokens == 0:
+                failed_stages.append("measurement_extraction")
             accumulated_tokens = accumulated_tokens + meas_tokens
 
             # --- Stage 4: Procedure Extraction ---
             procedures_result, proc_latency, proc_tokens = await self._run_stage_procedures(
                 document_id, document_text, entity_registry, stage_index=4
             )
+            if proc_tokens.total_tokens == 0:
+                failed_stages.append("procedure_extraction")
             accumulated_tokens = accumulated_tokens + proc_tokens
 
             # --- Stage 5: Risk Extraction ---
             risks_result, risk_latency, risk_tokens = await self._run_stage_risks(
                 document_id, document_text, entity_registry, stage_index=5
             )
+            if risk_tokens.total_tokens == 0:
+                failed_stages.append("risk_extraction")
             accumulated_tokens = accumulated_tokens + risk_tokens
 
             # --- Stage 6: Summary Generation ---
             summary_result, summary_latency, summary_tokens = await self._run_stage_summary(
                 document_id, document_text, filename, stage_index=6
             )
+            if summary_tokens.total_tokens == 0:
+                failed_stages.append("summary_generation")
             accumulated_tokens = accumulated_tokens + summary_tokens
 
             # --- Stage 7: Ontology Discovery ---
             ontology_result, ontology_latency, ontology_tokens = await self._run_stage_ontology(
                 document_id, document_text, entity_registry, stage_index=7
             )
+            if ontology_tokens.total_tokens == 0:
+                failed_stages.append("ontology_discovery")
             accumulated_tokens = accumulated_tokens + ontology_tokens
+
+            # --- Guard: all stages failed = infrastructure failure, not empty doc ---
+            # When every stage returns zero tokens it means every LLM call raised
+            # an exception. Treat this as a retryable infrastructure failure rather
+            # than silently persisting an empty CKO and emitting a success event.
+            if len(failed_stages) == TOTAL_STAGES:
+                error_msg = (
+                    f"All {TOTAL_STAGES} extraction stages failed for document "
+                    f"{document_id}. Failed stages: {failed_stages}. "
+                    "This is an infrastructure error (e.g. LLM misconfiguration), "
+                    "not an empty document. Treating as pipeline failure."
+                )
+                logger.error(
+                    "extraction_all_stages_failed",
+                    document_id=document_id,
+                    failed_stages=failed_stages,
+                )
+                raise RuntimeError(error_msg)
 
             # --- Confidence Filtering ---
             accepted_entities, flagged_entities = self._validator.split_by_confidence(

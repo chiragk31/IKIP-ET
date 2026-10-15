@@ -36,7 +36,7 @@ from app.core.dependencies import (
     get_storage_repository,
     get_document_repository,
     get_inngest_client,
-    get_llm_service,
+    create_llm_service_for_inngest,
     get_knowledge_repository,
 )
 
@@ -85,12 +85,17 @@ async def handle_document_processed(
     )
 
     try:
-        # Build ExtractionService with production dependencies
+        # Build ExtractionService with production dependencies.
+        # NOTE: create_llm_service_for_inngest() is used instead of
+        # get_llm_service() because this handler runs outside FastAPI
+        # request handling — FastAPI's Depends() resolver is not active
+        # here, so calling get_llm_service() directly would pass the raw
+        # Depends(get_prompt_manager) marker object as prompt_manager.
         supabase = get_supabase_client()
         storage_repo = get_storage_repository(supabase=supabase)
         document_repo = get_document_repository(supabase=supabase)
         inngest = get_inngest_client()
-        llm_service = get_llm_service()
+        llm_service = create_llm_service_for_inngest()
         knowledge_repo = get_knowledge_repository(supabase=supabase)
 
         service = ExtractionService(

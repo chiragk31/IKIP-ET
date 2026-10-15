@@ -29,7 +29,7 @@ import structlog
 
 from app.core.dependencies import (
     get_inngest_client,
-    get_graph_service,
+    create_graph_service_for_inngest,
 )
 
 logger = structlog.get_logger(__name__)
@@ -69,8 +69,10 @@ async def handle_ontology_updated(
     )
 
     try:
-        # Resolve dependencies (same pattern as ontology_handler.py)
-        graph_svc = get_graph_service()
+        # NOTE: create_graph_service_for_inngest() is used instead of
+        # get_graph_service() because this handler runs outside FastAPI
+        # request handling — FastAPI's Depends() resolver is not active.
+        graph_svc = create_graph_service_for_inngest()
         inngest = get_inngest_client()
 
         # Run the graph build pipeline

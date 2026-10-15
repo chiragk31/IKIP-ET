@@ -27,6 +27,7 @@ import structlog
 
 from app.core.dependencies import (
     get_embedding_service,
+    create_embedding_service_for_inngest,
     get_inngest_client,
 )
 
@@ -64,8 +65,10 @@ async def handle_graph_updated(
     )
 
     try:
-        # Resolve dependencies (same pattern as graph_handler.py)
-        embedding_svc = get_embedding_service()
+        # NOTE: create_embedding_service_for_inngest() is used instead of
+        # get_embedding_service() because this handler runs outside FastAPI
+        # request handling — FastAPI's Depends() resolver is not active.
+        embedding_svc = create_embedding_service_for_inngest()
         inngest = get_inngest_client()
 
         # Run the embedding pipeline

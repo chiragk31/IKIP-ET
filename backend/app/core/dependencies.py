@@ -225,13 +225,19 @@ def get_prompt_manager() -> PromptManager:
     return PromptManager()
 
 
-@lru_cache()
 def get_llm_service(
     prompt_manager: PromptManager = Depends(get_prompt_manager),
 ) -> LLMService:
     """
-    Inject LLMService (cached singleton).
+    Inject LLMService via FastAPI dependency injection.
     This is the ONLY service that may call Gemini directly.
+
+    NOTE: Do NOT add @lru_cache() here — the function signature uses
+    Depends(get_prompt_manager) which is only resolved by FastAPI's
+    dependency injector. Calling it directly with no arguments would
+    pass the Depends object itself as prompt_manager.
+    For non-FastAPI contexts (Inngest handlers), use
+    create_llm_service_for_inngest() instead.
 
     Args:
         prompt_manager: Injected PromptManager
@@ -240,6 +246,28 @@ def get_llm_service(
         LLMService: Configured LLM gateway
     """
     settings = get_settings()
+    return LLMService(
+        api_key=settings.GEMINI_API_KEY,
+        model=settings.GEMINI_MODEL,
+        temperature=settings.GEMINI_TEMPERATURE,
+        max_retries=settings.GEMINI_MAX_RETRIES,
+        timeout=settings.GEMINI_TIMEOUT,
+        prompt_manager=prompt_manager,
+    )
+
+
+def create_llm_service_for_inngest() -> LLMService:
+    """
+    Construct a fully-initialized LLMService without FastAPI DI.
+
+    Use this in Inngest handlers and any other non-request execution
+    paths where FastAPI's Depends() resolution is not available.
+
+    Returns:
+        LLMService: Configured LLM gateway with a real PromptManager
+    """
+    settings = get_settings()
+    prompt_manager = get_prompt_manager()  # @lru_cache — safe to call directly
     return LLMService(
         api_key=settings.GEMINI_API_KEY,
         model=settings.GEMINI_MODEL,
@@ -312,28 +340,49 @@ def get_extraction_service(
 def get_ontology_repository(
     supabase: SupabaseClient = Depends(get_supabase_client),
 ) -> OntologyRepository:
-    """Inject OntologyRepository."""
+    """Inject OntologyRepository (FastAPI DI only)."""
     return OntologyRepository(supabase=supabase)
 
 
 def get_ontology_manager(
     ontology_repo: OntologyRepository = Depends(get_ontology_repository),
 ) -> OntologyManager:
-    """Inject OntologyManager."""
+    """
+    Inject OntologyManager (FastAPI DI only).
+
+    For non-FastAPI contexts (Inngest handlers), use
+    create_ontology_manager_for_inngest() instead.
+    """
+    return OntologyManager(ontology_repo=ontology_repo)
+
+
+def create_ontology_manager_for_inngest() -> OntologyManager:
+    """
+    Construct a fully-initialized OntologyManager without FastAPI DI.
+
+    Use this in Inngest handlers and any other non-request execution
+    paths where FastAPI's Depends() resolution is not available.
+
+    Returns:
+        OntologyManager: Configured with a real OntologyRepository
+    """
+    supabase = get_supabase_client()  # @lru_cache — safe to call directly
+    ontology_repo = OntologyRepository(supabase=supabase)
     return OntologyManager(ontology_repo=ontology_repo)
 
 
 # -----------------------------------------------
 # Graph Builder (Epic 5)
 # -----------------------------------------------
-@lru_cache()
+
 def get_graph_repository(
     neo4j: Neo4jClient = Depends(get_neo4j_client),
 ) -> GraphRepository:
     """
-    Inject GraphRepository.
+    Inject GraphRepository (FastAPI DI only).
 
     This is the ONLY Neo4j writer in the entire platform.
+    For non-FastAPI contexts, use create_graph_service_for_inngest().
 
     Args:
         neo4j: Injected Neo4j client
@@ -349,9 +398,10 @@ def get_graph_service(
     graph_repo: GraphRepository = Depends(get_graph_repository),
 ) -> GraphService:
     """
-    Inject GraphService.
+    Inject GraphService (FastAPI DI only).
 
-    Orchestrates the NKO → Neo4j graph build pipeline.
+    Orchestrates the NKO -> Neo4j graph build pipeline.
+    For non-FastAPI contexts, use create_graph_service_for_inngest().
 
     Args:
         ontology_repo: Repository to load the NKO from Supabase Storage
@@ -360,6 +410,26 @@ def get_graph_service(
     Returns:
         GraphService instance
     """
+    return GraphService(
+        ontology_repo=ontology_repo,
+        graph_repo=graph_repo,
+    )
+
+
+def create_graph_service_for_inngest() -> GraphService:
+    """
+    Construct a fully-initialized GraphService without FastAPI DI.
+
+    Use this in Inngest handlers and any other non-request execution
+    paths where FastAPI's Depends() resolution is not available.
+
+    Returns:
+        GraphService: Configured with real OntologyRepository and GraphRepository
+    """
+    supabase = get_supabase_client()  # @lru_cache — safe to call directly
+    neo4j = get_neo4j_client()        # @lru_cache — safe to call directly
+    ontology_repo = OntologyRepository(supabase=supabase)
+    graph_repo = GraphRepository(neo4j=neo4j)
     return GraphService(
         ontology_repo=ontology_repo,
         graph_repo=graph_repo,
@@ -395,9 +465,10 @@ def get_embedding_service(
     pinecone_repo: PineconeRepository = Depends(get_pinecone_repository),
 ) -> EmbeddingService:
     """
-    Inject EmbeddingService.
+    Inject EmbeddingService (FastAPI DI only).
 
-    Orchestrates the CanonicalDocument → Pinecone embedding pipeline.
+    Orchestrates the CanonicalDocument -> Pinecone embedding pipeline.
+    For non-FastAPI contexts, use create_embedding_service_for_inngest().
 
     Args:
         storage_repo: For loading the CanonicalDocument from Supabase Storage.
@@ -414,6 +485,30 @@ def get_embedding_service(
         storage_repo=storage_repo,
         document_repo=document_repo,
         ontology_repo=ontology_repo,
+        embedding_provider=embedding_provider,
+        pinecone_repo=pinecone_repo,
+    )
+
+
+def create_embedding_service_for_inngest() -> EmbeddingService:
+    """
+    Construct a fully-initialized EmbeddingService without FastAPI DI.
+
+    Use this in Inngest handlers and any other non-request execution
+    paths where FastAPI's Depends() resolution is not available.
+
+    Returns:
+        EmbeddingService: Configured with real storage, document, ontology,
+        embedding provider, and Pinecone repos.
+    """
+    supabase = get_supabase_client()    # @lru_cache — safe to call directly
+    pinecone_repo = get_pinecone_repository()  # @lru_cache — safe
+    llm_service = create_llm_service_for_inngest()
+    embedding_provider = GoogleEmbeddingProvider(llm_service=llm_service)
+    return EmbeddingService(
+        storage_repo=StorageRepository(supabase=supabase),
+        document_repo=DocumentRepository(supabase=supabase),
+        ontology_repo=OntologyRepository(supabase=supabase),
         embedding_provider=embedding_provider,
         pinecone_repo=pinecone_repo,
     )

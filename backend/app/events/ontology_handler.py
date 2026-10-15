@@ -9,7 +9,7 @@ from app.core.dependencies import (
     get_supabase_client,
     get_knowledge_repository,
     get_inngest_client,
-    get_ontology_manager,
+    create_ontology_manager_for_inngest,
 )
 
 logger = structlog.get_logger(__name__)
@@ -39,7 +39,12 @@ async def handle_knowledge_extracted(
         supabase = get_supabase_client()
         knowledge_repo = get_knowledge_repository(supabase=supabase)
         inngest = get_inngest_client()
-        ontology_manager = get_ontology_manager()
+        # NOTE: create_ontology_manager_for_inngest() is used instead of
+        # get_ontology_manager() because this handler runs outside FastAPI
+        # request handling — FastAPI's Depends() resolver is not active here,
+        # so calling get_ontology_manager() directly would pass the raw
+        # Depends(get_ontology_repository) marker as ontology_repo.
+        ontology_manager = create_ontology_manager_for_inngest()
         
         # 1. Load CKO
         cko = knowledge_repo.load(document_id)
