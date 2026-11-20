@@ -65,6 +65,7 @@ async def update_ontology(ctx,step):
         document_id=data["document_id"],
         knowledge_id=data["knowledge_id"],
         confidence=data["confidence"],
+        canonical_storage_path=data.get("canonical_storage_path", ""),
         user_id=data.get("user_id"),
     )
 
@@ -79,6 +80,7 @@ async def build_knowledge_graph(ctx,step):
     return await handle_ontology_updated(
         document_id=data["document_id"],
         nko_storage_path=data.get("nko_storage_path"),
+        canonical_storage_path=data.get("canonical_storage_path", ""),
         entity_count=data.get("entity_count", 0),
         relationship_count=data.get("relationship_count", 0),
         user_id=data.get("user_id"),
@@ -94,6 +96,7 @@ async def create_embeddings(ctx,step):
 
     return await handle_graph_updated(
         document_id=data["document_id"],
+        canonical_storage_path=data["canonical_storage_path"],
         nodes_written=data.get("nodes_written", 0),
         relationships_written=data.get("relationships_written", 0),
         user_id=data.get("user_id"),

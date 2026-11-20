@@ -353,10 +353,14 @@ class ExtractionService:
             self._update_status(document_id, "completed", ProcessingStage.COMPLETED.value)
 
             # --- Emit knowledge.extracted event ---
+            # canonical_storage_path is forwarded so the ontology → graph →
+            # embedding chain can propagate it to EmbeddingService.embed()
+            # without recomputing or guessing the path.
             self._inngest.send_knowledge_extracted_event(
                 document_id=document_id,
                 knowledge_id=record.id,
                 confidence=overall_confidence,
+                canonical_storage_path=canonical_storage_path,
                 user_id=user_id,
             )
 

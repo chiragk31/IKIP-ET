@@ -19,6 +19,7 @@ async def handle_knowledge_extracted(
     document_id: str,
     knowledge_id: str,
     confidence: float,
+    canonical_storage_path: str = "",
     user_id: str = None,
 ) -> dict:
     """
@@ -26,6 +27,15 @@ async def handle_knowledge_extracted(
     
     Triggers the ontology normalization and validation pipeline (Epic 4),
     converting a CKO into an NKO, and emits the `ontology.updated` event.
+
+    Args:
+        document_id: Document UUID
+        knowledge_id: UUID of the persisted KnowledgeRecord
+        confidence: Overall extraction confidence score
+        canonical_storage_path: Actual storage path of the canonical JSON.
+            Forwarded in the ontology.updated event so Graph Builder can
+            pass it on to the Embedding pipeline (Epic 6).
+        user_id: Optional user context
     """
     start_time = time.time()
 
@@ -66,11 +76,14 @@ async def handle_knowledge_extracted(
         nko_storage_path = f"normalized/{document_id}/nko.json"
 
         # 3. Emit ontology.updated event for Graph Builder (Epic 5)
+        # canonical_storage_path is forwarded so Graph Builder can include
+        # it in the graph.updated event for the Embedding pipeline (Epic 6).
         inngest.send_event(
             event_name="ontology.updated",
             payload={
                 "document_id": document_id,
                 "nko_storage_path": nko_storage_path,
+                "canonical_storage_path": canonical_storage_path,
                 "entity_count": len(nko.entities),
                 "relationship_count": len(nko.relationships),
             },

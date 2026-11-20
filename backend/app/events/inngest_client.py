@@ -239,6 +239,7 @@ class InngestClient:
         document_id: str,
         knowledge_id: str,
         confidence: float,
+        canonical_storage_path: str = "",
         user_id: Optional[str] = None,
     ) -> bool:
         """
@@ -251,6 +252,9 @@ class InngestClient:
             document_id: Supabase document ID
             knowledge_id: UUID of the persisted KnowledgeRecord
             confidence: Overall extraction confidence score
+            canonical_storage_path: Actual storage path of the canonical JSON
+                (propagated forward so embedding handler can load the document
+                without recomputing or guessing the path)
             user_id: User ID (optional)
 
         Returns:
@@ -260,6 +264,7 @@ class InngestClient:
             "document_id": document_id,
             "knowledge_id": knowledge_id,
             "confidence": confidence,
+            "canonical_storage_path": canonical_storage_path,
             "user_id": user_id,
         }
 
@@ -309,6 +314,7 @@ class InngestClient:
         document_id: str,
         nodes_written: int,
         relationships_written: int,
+        canonical_storage_path: str = "",
         user_id: Optional[str] = None,
     ) -> bool:
         """
@@ -321,6 +327,8 @@ class InngestClient:
             document_id: Supabase document ID
             nodes_written: Number of nodes merged into Neo4j
             relationships_written: Number of relationships merged into Neo4j
+            canonical_storage_path: Actual storage path of the canonical JSON
+                (required by EmbeddingService.embed() to load the document)
             user_id: User ID (optional)
 
         Returns:
@@ -330,6 +338,7 @@ class InngestClient:
             "document_id": document_id,
             "nodes_written": nodes_written,
             "relationships_written": relationships_written,
+            "canonical_storage_path": canonical_storage_path,
             "user_id": user_id,
         }
 

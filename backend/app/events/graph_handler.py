@@ -38,6 +38,7 @@ logger = structlog.get_logger(__name__)
 async def handle_ontology_updated(
     document_id: str,
     nko_storage_path: str = None,
+    canonical_storage_path: str = "",
     entity_count: int = 0,
     relationship_count: int = 0,
     user_id: str = None,
@@ -51,6 +52,9 @@ async def handle_ontology_updated(
     Args:
         document_id: Document whose NKO to consume.
         nko_storage_path: Storage path for logging context (optional).
+        canonical_storage_path: Actual storage path of the canonical JSON.
+            Forwarded in the graph.updated event so the Embedding pipeline
+            (Epic 6) can call EmbeddingService.embed() with the correct path.
         entity_count: Entity count from the event payload (informational).
         relationship_count: Relationship count from the event payload (informational).
         user_id: Optional user context for the downstream event.
@@ -83,11 +87,14 @@ async def handle_ontology_updated(
 
         duration = time.time() - start_time
 
-        # Emit graph.updated event for downstream modules (Epic 6 — Embeddings)
+        # Emit graph.updated event for downstream modules (Epic 6 — Embeddings).
+        # canonical_storage_path is forwarded so EmbeddingService.embed() can
+        # load the canonical document without recomputing the storage path.
         inngest.send_graph_updated_event(
             document_id=document_id,
             nodes_written=result.nodes_written,
             relationships_written=result.relationships_written,
+            canonical_storage_path=canonical_storage_path,
             user_id=user_id,
         )
 

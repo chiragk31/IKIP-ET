@@ -9,17 +9,18 @@ Event flow:
         ↓
     handle_graph_updated()
         ↓
-    EmbeddingService.embed(document_id)
+    EmbeddingService.embed(document_id, canonical_storage_path)
         ↓
     InngestClient.send_embeddings_created_event()
         ↓
     embeddings.created
 
 Design:
- - Receives the same graph.updated payload as emitted by graph_handler.py:
-   {document_id, nodes_written, relationships_written, user_id}
+ - Receives the graph.updated payload emitted by graph_handler.py:
+   {document_id, canonical_storage_path, nodes_written, relationships_written, user_id}
+ - canonical_storage_path is propagated from document.processed all the way
+   through knowledge.extracted → ontology.updated → graph.updated.
  - No AI calls in this handler.
- - Follows the same pattern as graph_handler.py exactly.
 """
 
 import time
@@ -36,6 +37,7 @@ logger = structlog.get_logger(__name__)
 
 async def handle_graph_updated(
     document_id: str,
+    canonical_storage_path: str,
     nodes_written: int = 0,
     relationships_written: int = 0,
     user_id: str = None,
@@ -48,6 +50,10 @@ async def handle_graph_updated(
 
     Args:
         document_id: Document whose CanonicalDocument + NKO to embed.
+        canonical_storage_path: Actual storage path of the canonical JSON in
+            Supabase Storage.  Required by EmbeddingService.embed().
+            Propagated from document.processed → knowledge.extracted →
+            ontology.updated → graph.updated.
         nodes_written: Node count from the event payload (informational).
         relationships_written: Relationship count from the event payload (informational).
         user_id: Optional user context for the downstream event.
@@ -71,8 +77,11 @@ async def handle_graph_updated(
         embedding_svc = create_embedding_service_for_inngest()
         inngest = get_inngest_client()
 
-        # Run the embedding pipeline
-        result = await embedding_svc.embed(document_id)
+        # Run the embedding pipeline.
+        # canonical_storage_path is the actual Supabase Storage path propagated
+        # from document.processed through knowledge.extracted, ontology.updated,
+        # and graph.updated.  Never guess or hardcode this path.
+        result = await embedding_svc.embed(document_id, canonical_storage_path)
 
         if result.status == "failed":
             raise ValueError(result.error_message or "Embedding pipeline failed")
