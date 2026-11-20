@@ -49,6 +49,8 @@ ENV/
 env.bak/
 venv.bak/
 backend/venv/
+backend/venv311/
+backend/venv312/
 backend/.venv/
 
 # pytest
