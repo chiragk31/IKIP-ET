@@ -132,7 +132,7 @@ temp/
 *.joblib
 *.h5
 *.pb
-models/
+
 
 # PaddleOCR inference models
 paddle_models/
